@@ -234,13 +234,15 @@ const app = {
         this.updateStats();
         this.updateHeader();
         this.renderAlarmSoundOptions();
+        this.renderNudgeSettings();
+        this.renderSlotSettings();
         this.switchTab('Dashboard');
         this.setupEventListeners();
 
         if (this.tasks.length === 0) this.pullTasksFromCloud(false);
 
         this.engineInterval = setInterval(() => { this.processEngine(); }, 5000);
-        setInterval(() => { this.updateHeader(); }, 60000);
+        setInterval(() => { this.updateHeader(); this.renderNudgeSettings(); }, 60000);
         setInterval(() => { this.syncCycle(); }, this.SYNC_EVERY_MS);
         setTimeout(() => this.syncCycle(), 2500);
 
@@ -637,14 +639,14 @@ const app = {
         } catch (e) {}
     },
 
-    sendDesktopNotification(title, body, requireInteraction = false) {
+    sendDesktopNotification(title, body, requireInteraction = false, tag = 'btw-overdue') {
         if (!("Notification" in window)) return;
 
         const opts = {
             body: body,
             icon: './icon-192.png',
             badge: './icon-192.png',
-            tag: 'btw-overdue',
+            tag: tag,
             renotify: true,
             requireInteraction: requireInteraction,
             vibrate: [200, 100, 200, 100, 200]
@@ -893,6 +895,8 @@ const app = {
         } else if (this.isAlarming) {
             this.stopPersistentAlarm(false);
         }
+
+        this.checkNudges(now);
     },
 
     triggerPersistentAlarm(tasks) {
@@ -1003,6 +1007,16 @@ const app = {
             const newDate = dateEl ? dateEl.value : '';
             const newTime = timeEl ? timeEl.value : '';
             if (!newDate) { this.showToast("Please select a valid date.", "warning"); return; }
+            const taken = this.slotClash(newDate, newTime, task.id);
+            if (taken) {
+                const free = this.nextFreeTime(newDate, newTime, task.id);
+                this.showToast(
+                    '"' + taken.description + '" already holds ' + this.formatTimeStr(taken.dueTime) + '.',
+                    'warning',
+                    free ? { label: 'Use ' + this.formatTimeStr(free), onClick: () => { if (timeEl) timeEl.value = free; } } : null
+                );
+                return;
+            }
             task.dueDate = newDate;
             task.dueTime = newTime || '';
             task.lastAckDate = null;
@@ -1040,6 +1054,249 @@ const app = {
 
         this.alarmingTasks = [];
         this.alarmSignature = '';
+    },
+
+    /* ---------- HEALTH NUDGES (walk / water) ----------
+       Standing reminders to leave the chair and to drink water. Same look and
+       sound as the past-due alert, but on a clock instead of a deadline: one
+       alert per slot between a start and end time, all set in Config. */
+    NUDGES: {
+        walk: {
+            icon: '🚶', title: 'Time To Walk',
+            line: 'Stand up, stretch and take a few minutes away from the desk.',
+            slotWord: 'walk break',
+            notifyTitle: '🚶 Time to walk', notifyBody: 'Stand up and move for a few minutes.',
+            doneLabel: 'I walked', tag: 'btw-walk', zIndex: 10400,
+            defaults: { on: true, start: '11:00', end: '19:30', every: 90, snooze: 10 }
+        },
+        water: {
+            icon: '💧', title: 'Time To Drink Water',
+            line: 'Take a drink and top up your bottle before the next task.',
+            slotWord: 'water break',
+            notifyTitle: '💧 Time to drink water', notifyBody: 'Have a glass of water.',
+            doneLabel: 'I drank', tag: 'btw-water', zIndex: 10300,
+            defaults: { on: true, start: '10:00', end: '19:30', every: 60, snooze: 10 }
+        }
+    },
+
+    nudgeKeys(kind) {
+        const cap = kind.charAt(0).toUpperCase() + kind.slice(1);
+        return {
+            cfg: 'pureEnergy' + cap + 'Cfg',
+            last: 'pureEnergy' + cap + 'Last',
+            skip: 'pureEnergy' + cap + 'Skip'
+        };
+    },
+
+    nudgeState: {},
+
+    nudgeCfg(kind) {
+        const def = this.NUDGES[kind].defaults;
+        let saved = {};
+        try {
+            const raw = JSON.parse(localStorage.getItem(this.nudgeKeys(kind).cfg) || '{}');
+            if (raw && typeof raw === 'object') saved = raw;
+        } catch (e) {}
+        const cfg = Object.assign({}, def, saved);
+        cfg.every = Math.max(10, Number(cfg.every) || def.every);
+        cfg.snooze = Math.max(1, Number(cfg.snooze) || def.snooze);
+        return cfg;
+    },
+
+    saveNudgeCfg(kind, patch) {
+        const cfg = Object.assign(this.nudgeCfg(kind), patch || {});
+        localStorage.setItem(this.nudgeKeys(kind).cfg, JSON.stringify(cfg));
+        this.renderNudgeSettings(kind);
+        return cfg;
+    },
+
+    toggleNudge(kind) {
+        const cfg = this.saveNudgeCfg(kind, { on: !this.nudgeCfg(kind).on });
+        if (cfg.on) localStorage.removeItem(this.nudgeKeys(kind).skip);
+        this.renderNudgeSettings(kind);
+        this.showToast(this.NUDGES[kind].title.replace('Time To ', '') + ' reminder ' + (cfg.on ? 'on' : 'off'), 'info');
+    },
+
+    nudgeToMinutes(hhmm, fallback) {
+        const parts = String(hhmm || '').split(':');
+        const h = Number(parts[0]), m = Number(parts[1]);
+        if (!isFinite(h) || !isFinite(m)) return fallback;
+        return Math.max(0, Math.min(1439, h * 60 + m));
+    },
+
+    nudgeToClock(mins) {
+        const h = Math.floor(mins / 60), m = mins % 60;
+        return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
+    },
+
+    // Every slot in the window, e.g. 11:00, 12:30, 14:00 … up to the end time.
+    nudgeSlots(cfg) {
+        const start = this.nudgeToMinutes(cfg.start, 660);
+        const end = this.nudgeToMinutes(cfg.end, 1170);
+        const out = [];
+        for (let m = start; m <= end; m += cfg.every) out.push(m);
+        return out;
+    },
+
+    nudgeNextSlot(cfg, nowMins) {
+        const slots = this.nudgeSlots(cfg);
+        for (let i = 0; i < slots.length; i++) if (slots[i] > nowMins) return slots[i];
+        return null;
+    },
+
+    checkNudges(now) {
+        // One alert on screen at a time: an overdue task comes first, and a
+        // second nudge waits its turn instead of stacking on top.
+        if (this.isAlarming) return;
+        if (Object.keys(this.nudgeState).some(k => this.nudgeState[k] && this.nudgeState[k].showing)) return;
+        Object.keys(this.NUDGES).forEach(kind => {
+            if (Object.keys(this.nudgeState).some(k => this.nudgeState[k] && this.nudgeState[k].showing)) return;
+            this.checkNudge(kind, now);
+        });
+    },
+
+    checkNudge(kind, now) {
+        const cfg = this.nudgeCfg(kind);
+        const keys = this.nudgeKeys(kind);
+        const state = this.nudgeState[kind] || (this.nudgeState[kind] = {});
+        if (!cfg.on || state.showing) return;
+
+        const todayStr = this.getLocalDateStr(now);
+        if (localStorage.getItem(keys.skip) === todayStr) return;
+        if (Date.now() < (state.snoozeUntil || 0)) return;
+
+        const nowMins = now.getHours() * 60 + now.getMinutes();
+        const due = this.nudgeSlots(cfg).filter(m => m <= nowMins);
+        if (!due.length) return;
+
+        const slot = due[due.length - 1];
+        const stamp = todayStr + ' ' + this.nudgeToClock(slot);
+        if (localStorage.getItem(keys.last) === stamp) return;
+        localStorage.setItem(keys.last, stamp);
+
+        // If the app was closed through the slot, let it pass quietly rather
+        // than nudging for a break that was due an hour ago.
+        if (nowMins - slot > 45) { this.renderNudgeSettings(kind); return; }
+        this.triggerNudge(kind, slot);
+    },
+
+    triggerNudge(kind, slotMins) {
+        const def = this.NUDGES[kind];
+        if (!def) return;
+        this.initAudio();
+        const state = this.nudgeState[kind] || (this.nudgeState[kind] = {});
+        state.showing = true;
+
+        const modalId = 'nudgeModal_' + kind;
+        let modal = document.getElementById(modalId);
+        if (!modal) {
+            modal = document.createElement('div');
+            modal.className = 'modal';
+            modal.id = modalId;
+            modal.style.zIndex = String(def.zIndex);
+            modal.innerHTML = `
+                <div class="modal-content modal-sm" style="border-color: rgba(52,199,89,0.4);">
+                    <div class="modal-header" style="border-bottom-color: rgba(52,199,89,0.25);">
+                        <h2 style="color:var(--green-ink);">${def.icon} ${this.sanitize(def.title)}</h2>
+                        <button class="modal-close" title="Dismiss" onclick="app.nudgeDone('${kind}')">✕</button>
+                    </div>
+                    <p style="color:var(--label-2); font-size:0.86rem; margin-bottom:14px;">${this.sanitize(def.line)}</p>
+                    <div class="walk-card" id="nudgeBody_${kind}"></div>
+                    <div class="modal-buttons">
+                        <button class="btn-modal primary" onclick="app.nudgeDone('${kind}')">${this.sanitize(def.doneLabel)}</button>
+                        <button class="btn-modal secondary" id="nudgeSnooze_${kind}" onclick="app.snoozeNudge('${kind}')">Snooze</button>
+                        <button class="btn-modal danger" onclick="app.nudgeOffForToday('${kind}')">Skip today</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+        }
+
+        const cfg = this.nudgeCfg(kind);
+        const now = new Date();
+        const nowMins = now.getHours() * 60 + now.getMinutes();
+        const at = this.formatTimeStr(this.nudgeToClock(typeof slotMins === 'number' ? slotMins : nowMins));
+        const next = this.nudgeNextSlot(cfg, nowMins);
+        const body = document.getElementById('nudgeBody_' + kind);
+        if (body) {
+            body.innerHTML =
+                '<div class="walk-card-time">' + this.sanitize(at) + ' ' + this.sanitize(def.slotWord) + '</div>' +
+                '<div class="walk-card-sub">Every ' + cfg.every + ' minutes, ' +
+                this.sanitize(this.formatTimeStr(cfg.start)) + ' to ' + this.sanitize(this.formatTimeStr(cfg.end)) +
+                (next ? ' · next at ' + this.sanitize(this.formatTimeStr(this.nudgeToClock(next))) : ' · last one today') +
+                '</div>';
+        }
+        const snoozeBtn = document.getElementById('nudgeSnooze_' + kind);
+        if (snoozeBtn) snoozeBtn.textContent = 'Snooze ' + cfg.snooze + ' min';
+
+        modal.classList.add('open');
+        this.sendDesktopNotification(def.notifyTitle, def.notifyBody, false, def.tag);
+
+        if (!state.soundInterval) {
+            this.playBeepPair();
+            state.soundInterval = setInterval(() => { this.playBeepPair(); }, 1800);
+            if (state.soundTimeout) clearTimeout(state.soundTimeout);
+            state.soundTimeout = setTimeout(() => {
+                if (state.soundInterval) { clearInterval(state.soundInterval); state.soundInterval = null; }
+            }, 30000);
+        }
+    },
+
+    stopNudge(kind) {
+        const state = this.nudgeState[kind] || (this.nudgeState[kind] = {});
+        const modal = document.getElementById('nudgeModal_' + kind);
+        if (modal) modal.classList.remove('open');
+        if (state.soundInterval) { clearInterval(state.soundInterval); state.soundInterval = null; }
+        if (state.soundTimeout) { clearTimeout(state.soundTimeout); state.soundTimeout = null; }
+        state.showing = false;
+        this.renderNudgeSettings(kind);
+    },
+
+    nudgeDone(kind) {
+        this.stopNudge(kind);
+        (this.nudgeState[kind] || {}).snoozeUntil = 0;
+    },
+
+    snoozeNudge(kind) {
+        const mins = this.nudgeCfg(kind).snooze;
+        (this.nudgeState[kind] || (this.nudgeState[kind] = {})).snoozeUntil = Date.now() + mins * 60000;
+        this.stopNudge(kind);
+        this.showToast('Reminder snoozed for ' + mins + ' minutes', 'info');
+    },
+
+    nudgeOffForToday(kind) {
+        localStorage.setItem(this.nudgeKeys(kind).skip, this.getLocalDateStr(new Date()));
+        this.stopNudge(kind);
+        this.showToast('No more reminders today', 'info');
+    },
+
+    renderNudgeSettings(kind) {
+        if (!kind) { Object.keys(this.NUDGES).forEach(k => this.renderNudgeSettings(k)); return; }
+        const cfg = this.nudgeCfg(kind);
+        const set = (id, val) => { const el = document.getElementById(id); if (el && el.value !== String(val)) el.value = val; };
+        set(kind + 'Start', cfg.start);
+        set(kind + 'End', cfg.end);
+        set(kind + 'Every', cfg.every);
+
+        const btn = document.getElementById(kind + 'Toggle');
+        const lbl = document.getElementById(kind + 'ToggleLabel');
+        if (btn) btn.classList.toggle('is-off', !cfg.on);
+        if (lbl) lbl.textContent = cfg.on ? 'Reminder on' : 'Reminder off';
+
+        const hint = document.getElementById(kind + 'NextHint');
+        if (!hint) return;
+        if (!cfg.on) { hint.textContent = 'Reminders are off.'; return; }
+        const now = new Date();
+        if (localStorage.getItem(this.nudgeKeys(kind).skip) === this.getLocalDateStr(now)) {
+            hint.textContent = 'Skipped for the rest of today.';
+            return;
+        }
+        const next = this.nudgeNextSlot(cfg, now.getHours() * 60 + now.getMinutes());
+        const slots = this.nudgeSlots(cfg);
+        hint.textContent = (next
+            ? 'Next nudge at ' + this.formatTimeStr(this.nudgeToClock(next)) + '.'
+            : 'Done for today — next one tomorrow at ' + this.formatTimeStr(cfg.start) + '.') +
+            ' ' + slots.length + ' a day: ' + slots.map(m => this.formatTimeStr(this.nudgeToClock(m))).join(', ') + '.';
     },
 
     copyToClipboard(text, btnEl) {
@@ -2124,6 +2381,7 @@ const app = {
 
         if (mailBtn) mailBtn.style.display = this.storedEmailId ? '' : 'none';
         this.checkDueHoliday();
+        this.checkSlotAvailability();
 
         modal.classList.add('open');
         setTimeout(() => { const d = document.getElementById('taskDescription'); if (d) d.focus(); }, 80);
@@ -2134,6 +2392,8 @@ const app = {
         if (modal) modal.classList.remove('open');
         const hint = document.getElementById('dueHolidayHint');
         if (hint) { hint.style.display = 'none'; hint.innerHTML = ''; }
+        const slotHint = document.getElementById('dueSlotHint');
+        if (slotHint) { slotHint.style.display = 'none'; slotHint.innerHTML = ''; slotHint.classList.remove('clash', 'ok'); }
         const form = document.getElementById('taskForm');
         if (form) form.reset();
         this.editingId = null;
@@ -2159,6 +2419,18 @@ const app = {
             notes: document.getElementById('taskNotes').value,
             updatedAt: Date.now()
         };
+
+        const clash = this.slotClash(fields.dueDate, fields.dueTime, this.editingId);
+        if (clash) {
+            const free = this.nextFreeTime(fields.dueDate, fields.dueTime, this.editingId);
+            this.checkSlotAvailability();
+            this.showToast(
+                '"' + clash.description + '" already holds ' + this.formatTimeStr(clash.dueTime) + '.',
+                'warning',
+                free ? { label: 'Use ' + this.formatTimeStr(free), onClick: () => this.useSlotTime(free) } : null
+            );
+            return;
+        }
 
         const todayStr = this.getLocalDateStr(new Date());
         const editing = !!this.editingId;
@@ -2761,6 +3033,124 @@ const app = {
         this.checkDueHoliday();
     },
 
+    /* ---------- TIME SLOTS ----------
+       A task with a due time holds the clock for the next few minutes, so two
+       jobs can't be booked on top of each other. Window length set in Config. */
+    SLOT_KEY: 'pureEnergySlotCfg',
+    SLOT_DEFAULTS: { on: true, minutes: 10 },
+
+    slotCfg() {
+        let saved = {};
+        try {
+            const raw = JSON.parse(localStorage.getItem(this.SLOT_KEY) || '{}');
+            if (raw && typeof raw === 'object') saved = raw;
+        } catch (e) {}
+        const cfg = Object.assign({}, this.SLOT_DEFAULTS, saved);
+        cfg.minutes = Math.max(1, Math.min(240, Number(cfg.minutes) || this.SLOT_DEFAULTS.minutes));
+        return cfg;
+    },
+
+    saveSlotCfg(patch) {
+        const cfg = Object.assign(this.slotCfg(), patch || {});
+        localStorage.setItem(this.SLOT_KEY, JSON.stringify(cfg));
+        this.renderSlotSettings();
+        this.checkSlotAvailability();
+        return cfg;
+    },
+
+    toggleSlots() {
+        const cfg = this.saveSlotCfg({ on: !this.slotCfg().on });
+        this.showToast(cfg.on ? 'Slot holding on' : 'Slot holding off', 'info');
+    },
+
+    // The task already holding this date and time, if any.
+    slotClash(dateStr, timeStr, ignoreId) {
+        const cfg = this.slotCfg();
+        if (!cfg.on || !dateStr || !timeStr) return null;
+        const want = this.nudgeToMinutes(timeStr, -1);
+        if (want < 0) return null;
+
+        return this.tasks.find(t => {
+            if (!t || t.deleted || t.purged || t.status === 'Completed') return false;
+            if (ignoreId && String(t.id) === String(ignoreId)) return false;
+            if ((t.dueDate || '') !== dateStr || !t.dueTime) return false;
+            const held = this.nudgeToMinutes(t.dueTime, -1);
+            if (held < 0) return false;
+            return Math.abs(held - want) < cfg.minutes;
+        }) || null;
+    },
+
+    // First time from this one onwards where nothing else is booked.
+    nextFreeTime(dateStr, timeStr, ignoreId) {
+        const cfg = this.slotCfg();
+        let mins = this.nudgeToMinutes(timeStr, -1);
+        if (mins < 0) return null;
+        for (let guard = 0; guard < 300; guard++) {
+            const clash = this.slotClash(dateStr, this.nudgeToClock(mins), ignoreId);
+            if (!clash) return this.nudgeToClock(mins);
+            mins = this.nudgeToMinutes(clash.dueTime, mins) + cfg.minutes;
+            if (mins > 1439) return null;
+        }
+        return null;
+    },
+
+    // Live hint under the due date and time in the task modal.
+    checkSlotAvailability() {
+        const hint = document.getElementById('dueSlotHint');
+        if (!hint) return;
+
+        const dateEl = document.getElementById('taskDueDate');
+        const timeEl = document.getElementById('taskDueTime');
+        const dateStr = dateEl ? dateEl.value : '';
+        const timeStr = timeEl ? timeEl.value : '';
+        const cfg = this.slotCfg();
+
+        const clash = this.slotClash(dateStr, timeStr, this.editingId);
+        if (!clash) {
+            hint.classList.remove('clash');
+            hint.classList.add('ok');
+            if (!cfg.on || !dateStr || !timeStr) { hint.style.display = 'none'; hint.innerHTML = ''; return; }
+            hint.innerHTML = '<span>Slot free — this entry holds ' + this.formatTimeStr(timeStr) +
+                ' to ' + this.formatTimeStr(this.nudgeToClock(this.nudgeToMinutes(timeStr, 0) + cfg.minutes)) + '.</span>';
+            hint.style.display = 'flex';
+            return;
+        }
+
+        const free = this.nextFreeTime(dateStr, timeStr, this.editingId);
+        hint.classList.remove('ok');
+        hint.classList.add('clash');
+        hint.innerHTML = '<span>' + this.sanitize(clash.description) + ' already holds ' +
+            this.formatTimeStr(clash.dueTime) + '.</span>' +
+            (free ? '<button type="button" onclick="app.useSlotTime(\'' + this.escAttr(free) + '\')">Use ' +
+                this.formatTimeStr(free) + '</button>' : '');
+        hint.style.display = 'flex';
+    },
+
+    useSlotTime(timeStr) {
+        const timeEl = document.getElementById('taskDueTime');
+        if (timeEl) timeEl.value = timeStr;
+        this.checkSlotAvailability();
+    },
+
+    renderSlotSettings() {
+        const cfg = this.slotCfg();
+        const mins = document.getElementById('slotMinutes');
+        if (mins && mins.value !== String(cfg.minutes)) mins.value = cfg.minutes;
+
+        const btn = document.getElementById('slotToggle');
+        const lbl = document.getElementById('slotToggleLabel');
+        if (btn) btn.classList.toggle('is-off', !cfg.on);
+        if (lbl) lbl.textContent = cfg.on ? 'Holding on' : 'Holding off';
+
+        const hint = document.getElementById('slotHint');
+        if (hint) {
+            hint.textContent = cfg.on
+                ? 'A task due at 11:15 AM holds the clock until ' +
+                  this.formatTimeStr(this.nudgeToClock(675 + cfg.minutes)) + '. Nothing else can be scheduled inside that window.'
+                : 'Two tasks can share the same time.';
+        }
+    },
+
     /* ---------- LOCAL STORAGE HEADROOM ---------- */
     STORAGE_LIMIT: 5 * 1024 * 1024,
 
@@ -3029,6 +3419,8 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 /* ---------------- PWA glue ---------------- */
+window.app = app;
+
 const pwa = {
     deferred: null,
     waitingWorker: null,
@@ -3045,29 +3437,27 @@ const pwa = {
         }
 
         if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => {
-                navigator.serviceWorker.register('./sw.js')
-                    .then(reg => {
-                        reg.addEventListener('updatefound', () => {
-                            const sw = reg.installing;
-                            if (!sw) return;
-                            sw.addEventListener('statechange', () => {
-                                if (sw.state === 'installed' && navigator.serviceWorker.controller) {
-                                    this.waitingWorker = sw;
-                                    if (window.app && app.showToast) app.showToast('A new version is ready — Config, Check update', 'info');
-                                }
-                            });
-                        });
-                    })
-                    .catch(err => console.warn('Service worker registration failed', err));
+            window.addEventListener('load', () => this.registerWorker());
 
-                let reloading = false;
-                navigator.serviceWorker.addEventListener('controllerchange', () => {
-                    if (reloading) return;
-                    reloading = true;
-                    window.location.reload();
-                });
+            // A new worker taking over means new files are live: reload once so
+            // the running page and the cache are the same version. The very
+            // first install claims an uncontrolled page — nothing to reload.
+            this.hadController = !!navigator.serviceWorker.controller;
+            navigator.serviceWorker.addEventListener('controllerchange', () => {
+                if (this.reloading || !this.hadController) return;
+                this.reloading = true;
+                window.location.reload();
             });
+
+            navigator.serviceWorker.addEventListener('message', (event) => {
+                const data = event.data || {};
+                if (data.type === 'SW_ACTIVATED' || data.type === 'VERSION') {
+                    this.version = data.version || this.version;
+                    this.renderVersion();
+                }
+            });
+        } else {
+            this.renderVersion();
         }
 
         window.addEventListener('beforeinstallprompt', (e) => {
@@ -3081,7 +3471,7 @@ const pwa = {
             this.deferred = null;
             const btn = document.getElementById('installBtn');
             if (btn) btn.style.display = 'none';
-            if (window.app && app.showToast) app.showToast('Installed. Open it from your home screen.', 'success');
+            if (typeof app !== 'undefined' && app.showToast) app.showToast('Installed. Open it from your home screen.', 'success');
         });
 
         const params = new URLSearchParams(location.search);
@@ -3107,17 +3497,123 @@ const pwa = {
         if (choice.outcome !== 'accepted') app.showToast('Install cancelled', 'info');
     },
 
-    checkUpdate() {
-        if (this.waitingWorker) {
-            this.waitingWorker.postMessage('skipWaiting');
-            app.showToast('Updating…', 'info');
-            return;
+    reg: null,
+    hadController: false,
+    waitingWorker: null,
+    reloading: false,
+    version: null,
+
+    async registerWorker() {
+        try {
+            const reg = await navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' });
+            this.reg = reg;
+
+            if (reg.waiting && navigator.serviceWorker.controller) this.onUpdateReady(reg.waiting);
+
+            reg.addEventListener('updatefound', () => {
+                const sw = reg.installing;
+                if (!sw) return;
+                sw.addEventListener('statechange', () => {
+                    if (sw.state === 'installed' && navigator.serviceWorker.controller) this.onUpdateReady(sw);
+                });
+            });
+
+            // Look for a new deploy on a slow loop, when the app comes back to
+            // the foreground, and when the connection returns.
+            setInterval(() => this.silentUpdateCheck(), 30 * 60 * 1000);
+            document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState === 'visible') this.silentUpdateCheck();
+            });
+            window.addEventListener('online', () => this.silentUpdateCheck());
+
+            this.askVersion();
+        } catch (err) {
+            console.warn('Service worker registration failed', err);
+            this.renderVersion();
         }
+    },
+
+    onUpdateReady(worker) {
+        if (!worker || this.waitingWorker === worker) return;  // one prompt per build
+        this.waitingWorker = worker;
+        this.renderVersion();
+        if (typeof app !== 'undefined' && app.showToast) {
+            app.showToast('A new version is ready.', 'info', { label: 'Update now', onClick: () => this.applyUpdate() });
+        }
+    },
+
+    applyUpdate() {
+        const worker = this.waitingWorker || (this.reg && this.reg.waiting);
+        if (!worker) { window.location.reload(); return; }
+        if (typeof app !== 'undefined' && app.showToast) app.showToast('Updating…', 'info');
+        worker.postMessage({ type: 'SKIP_WAITING' });
+        // If the worker does not hand over within a few seconds, reload anyway.
+        setTimeout(() => { if (!this.reloading) { this.reloading = true; window.location.reload(); } }, 4000);
+    },
+
+    silentUpdateCheck() {
+        if (!this.reg || !navigator.onLine) return;
+        this.reg.update().catch(() => {});
+    },
+
+    askVersion() {
+        const sw = navigator.serviceWorker.controller;
+        if (!sw || !window.MessageChannel) { this.renderVersion(); return; }
+        const channel = new MessageChannel();
+        channel.port1.onmessage = (event) => {
+            const data = event.data || {};
+            if (data.version) { this.version = data.version; this.renderVersion(); }
+        };
+        try { sw.postMessage({ type: 'GET_VERSION' }, [channel.port2]); } catch (e) { this.renderVersion(); }
+    },
+
+    renderVersion() {
+        const el = document.getElementById('swVersion');
+        if (!el) return;
+        if (!('serviceWorker' in navigator)) { el.textContent = 'Offline cache needs a hosted copy over HTTPS.'; return; }
+        const bits = [];
+        bits.push(this.version ? 'Cache ' + this.version : 'Cache starting up');
+        bits.push(navigator.serviceWorker.controller ? 'offline ready' : 'not cached yet');
+        if (this.waitingWorker) bits.push('update waiting');
+        el.textContent = bits.join(' · ') + '.';
+    },
+
+    async checkUpdate() {
         if (!('serviceWorker' in navigator)) { app.showToast('Updates need a hosted copy over HTTPS', 'warning'); return; }
-        navigator.serviceWorker.getRegistration().then(reg => {
-            if (!reg) { app.showToast('Not installed yet', 'info'); return; }
-            reg.update().then(() => app.showToast('You are on the latest version', 'success'));
-        });
+        if (this.waitingWorker) { this.applyUpdate(); return; }
+
+        const reg = this.reg || await navigator.serviceWorker.getRegistration();
+        if (!reg) { app.showToast('Not installed yet', 'info'); return; }
+        this.reg = reg;
+
+        app.showToast('Checking for an update…', 'info');
+        try {
+            await reg.update();
+            await new Promise(r => setTimeout(r, 1200));
+            if (this.waitingWorker || reg.waiting) { this.onUpdateReady(this.waitingWorker || reg.waiting); return; }
+            this.askVersion();
+            app.showToast('You are on the latest version' + (this.version ? ' (' + this.version + ')' : ''), 'success');
+        } catch (e) {
+            app.showToast('Could not reach the server', 'error');
+        }
+    },
+
+    // Last resort when a phone is stuck on an old build: wipe every cache and
+    // re-fetch from the server. Tasks live in local storage and are untouched.
+    clearCache() {
+        if (!confirm('Clear the offline cache and reload?\n\nYour entries stay on this device.')) return;
+        const done = () => window.location.reload(true);
+        const sw = navigator.serviceWorker && navigator.serviceWorker.controller;
+        if (sw && window.MessageChannel) {
+            const channel = new MessageChannel();
+            channel.port1.onmessage = done;
+            try { sw.postMessage({ type: 'CLEAR_CACHES' }, [channel.port2]); } catch (e) { done(); }
+            setTimeout(done, 3000);
+        } else if (window.caches) {
+            caches.keys().then(keys => Promise.all(keys.map(k => caches.delete(k)))).then(done).catch(done);
+        } else {
+            done();
+        }
     }
 };
 pwa.init();

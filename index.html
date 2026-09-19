@@ -795,6 +795,26 @@
         .sheet-item:hover { background: var(--glass-bg); transform: translateY(-3px); box-shadow: var(--glass-shadow-sm); border-color: var(--accent); }
         .sheet-item .ico { font-size: 1.2rem; }
 
+        .walk-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; }
+        .walk-row .sheet-item { flex: 0 0 auto; min-width: 140px; height: 68px; }
+        .walk-toggle.is-off { opacity: 0.5; }
+        .walk-field { display: flex; flex-direction: column; gap: 6px; font-size: 0.76rem; font-weight: 700; color: var(--label-2); }
+        .walk-field input {
+            height: 44px; padding: 0 12px; font-size: 0.9rem; font-weight: 600; color: var(--label);
+            background: var(--input-bg); border: 1px solid var(--line-strong); border-radius: 12px; outline: none;
+        }
+        .walk-field input:focus { border-color: var(--accent); }
+        .walk-field input[type="number"] { width: 110px; }
+        html[data-shell="mobile"] .walk-row .sheet-item, html[data-shell="mobile"] .walk-field { flex: 1 1 140px; }
+        html[data-shell="mobile"] .walk-field input { width: 100%; }
+
+        .walk-card {
+            padding: 14px 16px; border-radius: 16px;
+            background: rgba(52,199,89,0.09); border: 1px solid rgba(52,199,89,0.25);
+        }
+        .walk-card-time { font-size: 1rem; font-weight: 800; color: var(--green-ink); font-family: var(--font-num); }
+        .walk-card-sub { margin-top: 4px; font-size: 0.8rem; font-weight: 600; color: var(--label-2); }
+
         .cfg-hint { margin: -4px 0 12px; font-size: 0.82rem; font-weight: 500; color: var(--label-2); line-height: 1.5; }
         .sound-list { display: flex; flex-direction: column; gap: 8px; }
         .sound-row {
@@ -884,6 +904,8 @@
             padding: 10px 12px; border-radius: 12px; font-size: 0.82rem; font-weight: 600;
             color: var(--amber-ink); background: rgba(255,149,0,0.10); border: 1px solid rgba(255,149,0,0.24);
         }
+        .due-hint.ok { color: var(--green-ink); background: rgba(52,199,89,0.10); border-color: rgba(52,199,89,0.24); }
+        .due-hint.clash { color: var(--red-ink); background: rgba(255,59,48,0.10); border-color: rgba(255,59,48,0.24); }
         .due-hint button {
             padding: 5px 11px; border-radius: 9px; cursor: pointer; font-size: 0.78rem; font-weight: 800;
             color: var(--blue-ink); background: rgba(0,122,255,0.10); border: 1px solid rgba(0,122,255,0.24);
@@ -1448,6 +1470,42 @@
         </div>
 
         <div class="cfg-section">
+            <div class="dash-title">Walk Reminder</div>
+            <p class="cfg-hint">Nudges you to leave the desk while you work. It alerts at each slot in the window below, with the same sound as a task alert.</p>
+            <div class="walk-row">
+                <button class="sheet-item walk-toggle" id="walkToggle" onclick="app.toggleNudge('walk')"><span class="ico">🚶</span><span id="walkToggleLabel">Reminder on</span></button>
+                <label class="walk-field">Start<input autocomplete="off" type="time" id="walkStart" onchange="app.saveNudgeCfg('walk', { start: this.value })"></label>
+                <label class="walk-field">End<input autocomplete="off" type="time" id="walkEnd" onchange="app.saveNudgeCfg('walk', { end: this.value })"></label>
+                <label class="walk-field">Every (min)<input autocomplete="off" type="number" min="10" step="5" id="walkEvery" onchange="app.saveNudgeCfg('walk', { every: Number(this.value) })"></label>
+                <button class="sheet-item" onclick="app.triggerNudge('walk')"><span class="ico">🔔</span>Preview</button>
+            </div>
+            <p class="cfg-hint" id="walkNextHint" style="margin: 12px 0 0;"></p>
+        </div>
+
+        <div class="cfg-section">
+            <div class="dash-title">Water Reminder</div>
+            <p class="cfg-hint">Nudges you to drink water through the day. Same alert style as the walk reminder, on its own schedule.</p>
+            <div class="walk-row">
+                <button class="sheet-item walk-toggle" id="waterToggle" onclick="app.toggleNudge('water')"><span class="ico">💧</span><span id="waterToggleLabel">Reminder on</span></button>
+                <label class="walk-field">Start<input autocomplete="off" type="time" id="waterStart" onchange="app.saveNudgeCfg('water', { start: this.value })"></label>
+                <label class="walk-field">End<input autocomplete="off" type="time" id="waterEnd" onchange="app.saveNudgeCfg('water', { end: this.value })"></label>
+                <label class="walk-field">Every (min)<input autocomplete="off" type="number" min="10" step="5" id="waterEvery" onchange="app.saveNudgeCfg('water', { every: Number(this.value) })"></label>
+                <button class="sheet-item" onclick="app.triggerNudge('water')"><span class="ico">🔔</span>Preview</button>
+            </div>
+            <p class="cfg-hint" id="waterNextHint" style="margin: 12px 0 0;"></p>
+        </div>
+
+        <div class="cfg-section">
+            <div class="dash-title">Time Slots</div>
+            <p class="cfg-hint">Keeps two tasks off the same time. A scheduled task holds the clock for the minutes below, and anything booked inside that window is turned away with the next free time.</p>
+            <div class="walk-row">
+                <button class="sheet-item walk-toggle" id="slotToggle" onclick="app.toggleSlots()"><span class="ico">⏱️</span><span id="slotToggleLabel">Holding on</span></button>
+                <label class="walk-field">Hold for (min)<input autocomplete="off" type="number" min="1" max="240" step="5" id="slotMinutes" onchange="app.saveSlotCfg({ minutes: Number(this.value) })"></label>
+            </div>
+            <p class="cfg-hint" id="slotHint" style="margin: 12px 0 0;"></p>
+        </div>
+
+        <div class="cfg-section">
             <div class="dash-title">Settings & Tools</div>
             <div class="sheet-grid">
                 <button class="sheet-item" onclick="app.openListManager('categories')"><span class="ico">⚙️</span>Lists</button>
@@ -1462,7 +1520,10 @@
                 <button class="sheet-item" id="installBtn" style="display:none;" onclick="pwa.install()"><span class="ico">⬇️</span>Install App</button>
                 <button class="sheet-item" id="notifyBtn" onclick="app.enableNotifications()"><span class="ico">🔔</span>Enable Alerts</button>
                 <button class="sheet-item" onclick="pwa.checkUpdate()"><span class="ico">🔄</span>Check Update</button>
+                <button class="sheet-item" onclick="pwa.clearCache()"><span class="ico">🧹</span>Clear Cache</button>
             </div>
+            <p class="cfg-hint" id="swVersion" style="margin: 14px 0 0;"></p>
+            <p class="cfg-hint" id="installHint" style="margin: 6px 0 0;"></p>
         </div>
     </div>
 
@@ -1501,10 +1562,11 @@
                 <div class="form-group">
                     <label style="color:var(--accent);">Due Date & Time</label>
                     <div style="display:flex; gap:12px;">
-                        <input autocomplete="off" type="date" id="taskDueDate" onchange="app.checkDueHoliday()">
-                        <input autocomplete="off" type="time" id="taskDueTime">
+                        <input autocomplete="off" type="date" id="taskDueDate" onchange="app.checkDueHoliday(); app.checkSlotAvailability()">
+                        <input autocomplete="off" type="time" id="taskDueTime" onchange="app.checkSlotAvailability()">
                     </div>
                     <div class="due-hint" id="dueHolidayHint"></div>
+                    <div class="due-hint" id="dueSlotHint"></div>
                 </div>
                 <div class="form-row">
                     <div class="form-group">
