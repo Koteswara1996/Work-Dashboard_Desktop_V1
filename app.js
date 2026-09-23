@@ -21,26 +21,7 @@ const app = {
     isAlarming: false, alarmingTasks: [], alarmSignature: '',
     lastSyncJSON: "", syncInProgress: false, userClearedAll: false, listsUpdatedAt: 0,
     fetchedEmails: [], storedEmailId: null, _searchTimer: null,
-
-    // Initial Bank Holidays Data (USD & Indian AP/TS)
-    holidays: [
-        { date: '2026-01-01', name: 'New Year\'s Day', nextWorkingDay: '2026-01-02', type: 'USD Holiday' },
-        { date: '2026-01-14', name: 'Bhogi', nextWorkingDay: '2026-01-16', type: 'Indian Bank Holiday' },
-        { date: '2026-01-15', name: 'Makar Sankranti', nextWorkingDay: '2026-01-16', type: 'Indian Bank Holiday' },
-        { date: '2026-01-19', name: 'Martin Luther King Jr. Day', nextWorkingDay: '2026-01-20', type: 'USD Holiday' },
-        { date: '2026-01-26', name: 'Republic Day', nextWorkingDay: '2026-01-27', type: 'Indian Bank Holiday' },
-        { date: '2026-02-16', name: 'Washington\'s Birthday', nextWorkingDay: '2026-02-17', type: 'USD Holiday' },
-        { date: '2026-03-19', name: 'Ugadi', nextWorkingDay: '2026-03-20', type: 'Indian Bank Holiday' },
-        { date: '2026-05-25', name: 'Memorial Day', nextWorkingDay: '2026-05-26', type: 'USD Holiday' },
-        { date: '2026-07-03', name: 'Independence Day (Observed)', nextWorkingDay: '2026-07-06', type: 'USD Holiday' },
-        { date: '2026-08-15', name: 'Independence Day (India)', nextWorkingDay: '2026-08-17', type: 'Indian Bank Holiday' },
-        { date: '2026-09-07', name: 'Labor Day', nextWorkingDay: '2026-09-08', type: 'USD Holiday' },
-        { date: '2026-10-02', name: 'Mahatma Gandhi Jayanti', nextWorkingDay: '2026-10-05', type: 'Indian Bank Holiday' },
-        { date: '2026-10-12', name: 'Columbus Day', nextWorkingDay: '2026-10-13', type: 'USD Holiday' },
-        { date: '2026-11-11', name: 'Veterans Day', nextWorkingDay: '2026-11-12', type: 'USD Holiday' },
-        { date: '2026-11-26', name: 'Thanksgiving Day', nextWorkingDay: '2026-11-27', type: 'USD Holiday' },
-        { date: '2026-12-25', name: 'Christmas Day', nextWorkingDay: '2026-12-28', type: 'USD Holiday' }
-    ],
+    holidays: [],
 
     // Shared Icons for Space-Saving Buttons
     SVGS: {
@@ -118,11 +99,12 @@ const app = {
         return new Date(year, month - 1, day, hours, minutes, seconds);
     },
 
-    /* ---------- AUTH & 5 GLASS THEMES ---------- */
+    /* ---------- AUTH & UI SETTINGS (Theme & Text Size) ---------- */
     checkAuthOnStart() {
         this.currentUser = localStorage.getItem('currentUser') || 'default';
         localStorage.setItem('currentUser', this.currentUser);
         this.applyTheme();
+        this.applyTextSize();
 
         document.getElementById('mainAppHeader').style.display = 'flex';
         document.getElementById('tabBar').style.display = 'flex';
@@ -135,10 +117,18 @@ const app = {
         }
     },
 
+    applyTextSize(size) {
+        let pick = size || localStorage.getItem('pureEnergyTextSize') || 'medium';
+        localStorage.setItem('pureEnergyTextSize', pick);
+        document.documentElement.setAttribute('data-text-size', pick);
+        
+        document.querySelectorAll('.text-btn').forEach(b => {
+            if(b.dataset.size) b.classList.toggle('on', b.dataset.size === pick);
+        });
+    },
+
     THEME_KEY: 'pureEnergyTheme',
 
-    /* Boot splash: hold it just long enough for the mark to finish drawing,
-       then fade out and let the shell animate in behind it. */
     BOOT_MIN_MS: 1350,
 
     hideSplash() {
@@ -165,8 +155,6 @@ const app = {
     },
 
     applyTheme(mode) {
-        // Defaults to the pure light 'pearl' theme. Anything unrecognised —
-        // including a theme saved before this build — falls back to it.
         let pick = mode || localStorage.getItem(this.THEME_KEY) || 'pearl';
         if (!Object.prototype.hasOwnProperty.call(this.THEMES, pick)) pick = 'pearl';
 
@@ -177,7 +165,7 @@ const app = {
         if (meta) meta.setAttribute('content', this.THEMES[pick]);
 
         document.querySelectorAll('.theme-btn').forEach(b => {
-            b.classList.toggle('on', b.dataset.theme === pick);
+            if(b.dataset.theme) b.classList.toggle('on', b.dataset.theme === pick);
         });
     },
 
@@ -195,8 +183,6 @@ const app = {
     },
 
     /* ---------- BOOT ---------- */
-    /* Stop the browser offering "Saved info" / past entries in any field.
-       Runs once on start and again for fields added later (alarm cards, modals). */
     noAutofill(root) {
         const scope = root && root.querySelectorAll ? root : document;
         const els = [];
@@ -223,6 +209,7 @@ const app = {
     initApp() {
         this.watchAutofill();
         this.loadLists();
+        this.loadHolidays();
         this.loadData();
         this.purgeOldBin();
         this.initViewMode();
@@ -304,9 +291,11 @@ const app = {
             case 'alarm-ack': this.alarmAction('ack', id); break;
             case 'alarm-snooze': this.alarmAction('snooze', id); break;
             case 'alarm-reschedule': this.alarmAction('reschedule', id); break;
+            case 'alarm-recur': this.alarmAction('recur', id); break;
             case 'dash-filter': this.filterFromDashboard(el.dataset.ftype, el.dataset.fvalue); break;
             case 'list-delete': this.deleteListOption(Number(el.dataset.index)); break;
             case 'sort-pick': this.pickSort(el.dataset.col); break;
+            case 'holiday-del': this.deleteHoliday(id); break;
         }
     },
 
@@ -356,6 +345,8 @@ const app = {
                 this.saveData();
                 this.populateDropdowns();
                 this.renderTable();
+                
+                this.processEngine(); // Instantly process so alarms update
 
                 const moved = result.added + result.updated;
                 if (manual) {
@@ -464,9 +455,17 @@ const app = {
         if (!this.currentUser) return;
         if ((localStorage.getItem(CONFIG.SYNC_URL_KEY) || "").trim() === "") return;
         if (this.cycleBusy) return;
-
         if (!manual && document.hidden) return;
-        if (!manual && document.querySelector('.modal.open')) return;
+        
+        // Prevent background sync wiping out forms if input-heavy modals are open.
+        if (!manual) {
+            const blockSyncModals = ['taskModal', 'listManagerModal', 'syncSetupModal', 'holidayModal'];
+            const isBlocked = blockSyncModals.some(id => {
+                const el = document.getElementById(id);
+                return el && el.classList.contains('open');
+            });
+            if (isBlocked) return;
+        }
 
         this.cycleBusy = true;
         Promise.resolve()
@@ -727,8 +726,6 @@ const app = {
         this.emitBeep();
     },
 
-    /* Each sound is its own small WebAudio recipe — no audio files to
-       ship, so this keeps working offline like the rest of the app. */
     ALARM_SOUNDS: {
         classic: { label: 'Classic Beep', build(ctx, t) {
             const osc = ctx.createOscillator(); const gain = ctx.createGain();
@@ -949,13 +946,11 @@ const app = {
         this.alarmingTasks.forEach(task => {
             const idAttr = this.escAttr(task.id);
             const priority = (task.priority || '').toString();
-            const isRecurring = task.recurrence && task.recurrence !== 'None';
 
             const chips = [];
             if (priority) chips.push(`<span class="chip pri-${this.escAttr(priority.replace(/\s+/g, '-'))}" style="display:inline-flex; align-items:center; gap:4px; padding:4px 10px; font-size:0.75rem; font-weight:600; border-radius:20px; color:var(--red-ink); background:rgba(239, 68, 68, 0.1); border:1px solid rgba(239, 68, 68, 0.2);">${this.sanitize(priority)}</span>`);
             if (task.category) chips.push(`<span class="chip cat" style="display:inline-flex; align-items:center; gap:4px; padding:4px 10px; font-size:0.75rem; font-weight:600; border-radius:20px; color:var(--blue-ink); background:rgba(37, 99, 235, 0.1); border:1px solid rgba(37, 99, 235, 0.2);">${this.sanitize(task.category)}</span>`);
             if (task.pendingWith) chips.push(`<span class="chip person" style="display:inline-flex; align-items:center; gap:4px; padding:4px 10px; font-size:0.75rem; font-weight:600; border-radius:20px; color:var(--amber-ink); background:rgba(245, 158, 11, 0.1); border:1px solid rgba(245, 158, 11, 0.25);">Pending with: ${this.sanitize(task.pendingWith)}</span>`);
-            chips.push(`<span class="chip rec" style="display:inline-flex; align-items:center; gap:4px; padding:4px 10px; font-size:0.75rem; font-weight:600; border-radius:20px; color:var(--violet-ink); background:rgba(139, 92, 246, 0.1); border:1px solid rgba(139, 92, 246, 0.2);">${isRecurring ? this.sanitize(task.recurrence) : 'One-time'}</span>`);
             
             const el = document.createElement('div');
             el.className = 'alarm-card';
@@ -967,6 +962,17 @@ const app = {
                 <div class="alarm-actions" style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
                     <button type="button" class="btn-row ok" data-action="alarm-done" data-id="${idAttr}" style="padding: 6px 12px; font-size: 0.78rem; font-weight: 600; color: var(--green-ink); background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.2); border-radius: 10px; cursor: pointer;">Mark done</button>
                     <button type="button" class="btn-row warn" data-action="alarm-ack" data-id="${idAttr}" style="padding: 6px 12px; font-size: 0.78rem; font-weight: 600; color: var(--amber-ink); background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.2); border-radius: 10px; cursor: pointer;">Silence today</button>
+                    
+                    <span class="alarm-field" style="display: flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 10px; background: var(--input-bg); border: 1px solid var(--line);">
+                        <select id="alarmRecur_${idAttr}" style="font-size: 0.84rem; color: var(--label); background: transparent; border: none; outline: none; padding: 4px;">
+                            <option value="None" ${task.recurrence === 'None' || !task.recurrence ? 'selected' : ''}>No Repeat</option>
+                            <option value="Daily" ${task.recurrence === 'Daily' ? 'selected' : ''}>Daily</option>
+                            <option value="Weekly" ${task.recurrence === 'Weekly' ? 'selected' : ''}>Weekly</option>
+                            <option value="Monthly" ${task.recurrence === 'Monthly' ? 'selected' : ''}>Monthly</option>
+                        </select>
+                        <button type="button" class="btn-row go" data-action="alarm-recur" data-id="${idAttr}" style="padding: 6px 12px; font-size: 0.78rem; font-weight: 600; color: var(--blue-ink); background: rgba(37, 99, 235, 0.1); border: 1px solid rgba(37, 99, 235, 0.2); border-radius: 10px; cursor: pointer;">Set</button>
+                    </span>
+
                     <span class="alarm-field" style="display: flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 10px; background: var(--input-bg); border: 1px solid var(--line);">
                         <input type="number" min="1" id="snoozeMins_${idAttr}" placeholder="Min" style="font-size: 0.84rem; color: var(--label); background: transparent; border: none; outline: none; padding: 4px; width: 50px; text-align: center;">
                         <button type="button" class="btn-row go" data-action="alarm-snooze" data-id="${idAttr}" style="padding: 6px 12px; font-size: 0.78rem; font-weight: 600; color: var(--blue-ink); background: rgba(37, 99, 235, 0.1); border: 1px solid rgba(37, 99, 235, 0.2); border-radius: 10px; cursor: pointer;">Snooze</button>
@@ -1001,6 +1007,15 @@ const app = {
             task.updatedAt = Date.now();
             this.saveData();
             this.showToast(`Snoozed for ${mins} minutes.`, "info");
+        } else if (action === 'recur') {
+            const recurEl = document.getElementById('alarmRecur_' + taskId);
+            if (recurEl) {
+                task.recurrence = recurEl.value;
+                task.updatedAt = Date.now();
+                this.saveData(); this.renderTable();
+                this.showToast("Recurrence updated.", "success");
+            }
+            return;
         } else if (action === 'reschedule') {
             const dateEl = document.getElementById('reschedDate_' + taskId);
             const timeEl = document.getElementById('reschedTime_' + taskId);
@@ -1056,97 +1071,36 @@ const app = {
         this.alarmSignature = '';
     },
 
-    /* ---------- HEALTH NUDGES (walk / water) ----------
-       Standing reminders to leave the chair and to drink water. Same look and
-       sound as the past-due alert, but on a clock instead of a deadline: one
-       alert per slot between a start and end time, all set in Config. */
+    /* ---------- HEALTH NUDGES ---------- */
     NUDGES: {
-        walk: {
-            icon: '🚶', title: 'Time To Walk',
-            line: 'Stand up, stretch and take a few minutes away from the desk.',
-            slotWord: 'walk break',
-            notifyTitle: '🚶 Time to walk', notifyBody: 'Stand up and move for a few minutes.',
-            doneLabel: 'I walked', tag: 'btw-walk', zIndex: 10400,
-            defaults: { on: true, start: '11:00', end: '19:30', every: 90, snooze: 10 }
-        },
-        water: {
-            icon: '💧', title: 'Time To Drink Water',
-            line: 'Take a drink and top up your bottle before the next task.',
-            slotWord: 'water break',
-            notifyTitle: '💧 Time to drink water', notifyBody: 'Have a glass of water.',
-            doneLabel: 'I drank', tag: 'btw-water', zIndex: 10300,
-            defaults: { on: true, start: '10:00', end: '19:30', every: 60, snooze: 10 }
-        }
+        walk: { icon: '🚶', title: 'Time To Walk', line: 'Stand up, stretch and take a few minutes away from the desk.', slotWord: 'walk break', notifyTitle: '🚶 Time to walk', notifyBody: 'Stand up and move for a few minutes.', doneLabel: 'I walked', tag: 'btw-walk', zIndex: 10400, defaults: { on: true, start: '11:00', end: '19:30', every: 90, snooze: 10 } },
+        water: { icon: '💧', title: 'Time To Drink Water', line: 'Take a drink and top up your bottle before the next task.', slotWord: 'water break', notifyTitle: '💧 Time to drink water', notifyBody: 'Have a glass of water.', doneLabel: 'I drank', tag: 'btw-water', zIndex: 10300, defaults: { on: true, start: '10:00', end: '19:30', every: 60, snooze: 10 } }
     },
-
-    nudgeKeys(kind) {
-        const cap = kind.charAt(0).toUpperCase() + kind.slice(1);
-        return {
-            cfg: 'pureEnergy' + cap + 'Cfg',
-            last: 'pureEnergy' + cap + 'Last',
-            skip: 'pureEnergy' + cap + 'Skip'
-        };
-    },
-
+    nudgeKeys(kind) { const cap = kind.charAt(0).toUpperCase() + kind.slice(1); return { cfg: 'pureEnergy' + cap + 'Cfg', last: 'pureEnergy' + cap + 'Last', skip: 'pureEnergy' + cap + 'Skip' }; },
     nudgeState: {},
-
     nudgeCfg(kind) {
         const def = this.NUDGES[kind].defaults;
         let saved = {};
-        try {
-            const raw = JSON.parse(localStorage.getItem(this.nudgeKeys(kind).cfg) || '{}');
-            if (raw && typeof raw === 'object') saved = raw;
-        } catch (e) {}
+        try { const raw = JSON.parse(localStorage.getItem(this.nudgeKeys(kind).cfg) || '{}'); if (raw && typeof raw === 'object') saved = raw; } catch (e) {}
         const cfg = Object.assign({}, def, saved);
-        cfg.every = Math.max(10, Number(cfg.every) || def.every);
-        cfg.snooze = Math.max(1, Number(cfg.snooze) || def.snooze);
+        cfg.every = Math.max(10, Number(cfg.every) || def.every); cfg.snooze = Math.max(1, Number(cfg.snooze) || def.snooze);
         return cfg;
     },
-
     saveNudgeCfg(kind, patch) {
         const cfg = Object.assign(this.nudgeCfg(kind), patch || {});
-        localStorage.setItem(this.nudgeKeys(kind).cfg, JSON.stringify(cfg));
-        this.renderNudgeSettings(kind);
-        return cfg;
+        localStorage.setItem(this.nudgeKeys(kind).cfg, JSON.stringify(cfg)); this.renderNudgeSettings(kind); return cfg;
     },
-
     toggleNudge(kind) {
         const cfg = this.saveNudgeCfg(kind, { on: !this.nudgeCfg(kind).on });
         if (cfg.on) localStorage.removeItem(this.nudgeKeys(kind).skip);
-        this.renderNudgeSettings(kind);
-        this.showToast(this.NUDGES[kind].title.replace('Time To ', '') + ' reminder ' + (cfg.on ? 'on' : 'off'), 'info');
+        this.renderNudgeSettings(kind); this.showToast(this.NUDGES[kind].title.replace('Time To ', '') + ' reminder ' + (cfg.on ? 'on' : 'off'), 'info');
     },
-
-    nudgeToMinutes(hhmm, fallback) {
-        const parts = String(hhmm || '').split(':');
-        const h = Number(parts[0]), m = Number(parts[1]);
-        if (!isFinite(h) || !isFinite(m)) return fallback;
-        return Math.max(0, Math.min(1439, h * 60 + m));
-    },
-
-    nudgeToClock(mins) {
-        const h = Math.floor(mins / 60), m = mins % 60;
-        return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
-    },
-
-    // Every slot in the window, e.g. 11:00, 12:30, 14:00 … up to the end time.
-    nudgeSlots(cfg) {
-        const start = this.nudgeToMinutes(cfg.start, 660);
-        const end = this.nudgeToMinutes(cfg.end, 1170);
-        const out = [];
-        for (let m = start; m <= end; m += cfg.every) out.push(m);
-        return out;
-    },
-
-    nudgeNextSlot(cfg, nowMins) {
-        const slots = this.nudgeSlots(cfg);
-        for (let i = 0; i < slots.length; i++) if (slots[i] > nowMins) return slots[i];
-        return null;
-    },
+    nudgeToMinutes(hhmm, fallback) { const parts = String(hhmm || '').split(':'); const h = Number(parts[0]), m = Number(parts[1]); if (!isFinite(h) || !isFinite(m)) return fallback; return Math.max(0, Math.min(1439, h * 60 + m)); },
+    nudgeToClock(mins) { const h = Math.floor(mins / 60), m = mins % 60; return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0'); },
+    nudgeSlots(cfg) { const start = this.nudgeToMinutes(cfg.start, 660); const end = this.nudgeToMinutes(cfg.end, 1170); const out = []; for (let m = start; m <= end; m += cfg.every) out.push(m); return out; },
+    nudgeNextSlot(cfg, nowMins) { const slots = this.nudgeSlots(cfg); for (let i = 0; i < slots.length; i++) if (slots[i] > nowMins) return slots[i]; return null; },
 
     checkNudges(now) {
-        // One alert on screen at a time: an overdue task comes first, and a
-        // second nudge waits its turn instead of stacking on top.
         if (this.isAlarming) return;
         if (Object.keys(this.nudgeState).some(k => this.nudgeState[k] && this.nudgeState[k].showing)) return;
         Object.keys(this.NUDGES).forEach(kind => {
@@ -1156,9 +1110,7 @@ const app = {
     },
 
     checkNudge(kind, now) {
-        const cfg = this.nudgeCfg(kind);
-        const keys = this.nudgeKeys(kind);
-        const state = this.nudgeState[kind] || (this.nudgeState[kind] = {});
+        const cfg = this.nudgeCfg(kind); const keys = this.nudgeKeys(kind); const state = this.nudgeState[kind] || (this.nudgeState[kind] = {});
         if (!cfg.on || state.showing) return;
 
         const todayStr = this.getLocalDateStr(now);
@@ -1169,31 +1121,21 @@ const app = {
         const due = this.nudgeSlots(cfg).filter(m => m <= nowMins);
         if (!due.length) return;
 
-        const slot = due[due.length - 1];
-        const stamp = todayStr + ' ' + this.nudgeToClock(slot);
+        const slot = due[due.length - 1]; const stamp = todayStr + ' ' + this.nudgeToClock(slot);
         if (localStorage.getItem(keys.last) === stamp) return;
         localStorage.setItem(keys.last, stamp);
-
-        // If the app was closed through the slot, let it pass quietly rather
-        // than nudging for a break that was due an hour ago.
         if (nowMins - slot > 45) { this.renderNudgeSettings(kind); return; }
         this.triggerNudge(kind, slot);
     },
 
     triggerNudge(kind, slotMins) {
-        const def = this.NUDGES[kind];
-        if (!def) return;
-        this.initAudio();
-        const state = this.nudgeState[kind] || (this.nudgeState[kind] = {});
-        state.showing = true;
+        const def = this.NUDGES[kind]; if (!def) return;
+        this.initAudio(); const state = this.nudgeState[kind] || (this.nudgeState[kind] = {}); state.showing = true;
 
         const modalId = 'nudgeModal_' + kind;
         let modal = document.getElementById(modalId);
         if (!modal) {
-            modal = document.createElement('div');
-            modal.className = 'modal';
-            modal.id = modalId;
-            modal.style.zIndex = String(def.zIndex);
+            modal = document.createElement('div'); modal.className = 'modal'; modal.id = modalId; modal.style.zIndex = String(def.zIndex);
             modal.innerHTML = `
                 <div class="modal-content modal-sm" style="border-color: rgba(52,199,89,0.4);">
                     <div class="modal-header" style="border-bottom-color: rgba(52,199,89,0.25);">
@@ -1207,105 +1149,59 @@ const app = {
                         <button class="btn-modal secondary" id="nudgeSnooze_${kind}" onclick="app.snoozeNudge('${kind}')">Snooze</button>
                         <button class="btn-modal danger" onclick="app.nudgeOffForToday('${kind}')">Skip today</button>
                     </div>
-                </div>
-            `;
+                </div>`;
             document.body.appendChild(modal);
         }
 
-        const cfg = this.nudgeCfg(kind);
-        const now = new Date();
-        const nowMins = now.getHours() * 60 + now.getMinutes();
+        const cfg = this.nudgeCfg(kind); const now = new Date(); const nowMins = now.getHours() * 60 + now.getMinutes();
         const at = this.formatTimeStr(this.nudgeToClock(typeof slotMins === 'number' ? slotMins : nowMins));
         const next = this.nudgeNextSlot(cfg, nowMins);
         const body = document.getElementById('nudgeBody_' + kind);
         if (body) {
-            body.innerHTML =
-                '<div class="walk-card-time">' + this.sanitize(at) + ' ' + this.sanitize(def.slotWord) + '</div>' +
-                '<div class="walk-card-sub">Every ' + cfg.every + ' minutes, ' +
-                this.sanitize(this.formatTimeStr(cfg.start)) + ' to ' + this.sanitize(this.formatTimeStr(cfg.end)) +
-                (next ? ' · next at ' + this.sanitize(this.formatTimeStr(this.nudgeToClock(next))) : ' · last one today') +
-                '</div>';
+            body.innerHTML = '<div class="walk-card-time">' + this.sanitize(at) + ' ' + this.sanitize(def.slotWord) + '</div>' +
+                '<div class="walk-card-sub">Every ' + cfg.every + ' minutes, ' + this.sanitize(this.formatTimeStr(cfg.start)) + ' to ' + this.sanitize(this.formatTimeStr(cfg.end)) +
+                (next ? ' · next at ' + this.sanitize(this.formatTimeStr(this.nudgeToClock(next))) : ' · last one today') + '</div>';
         }
-        const snoozeBtn = document.getElementById('nudgeSnooze_' + kind);
-        if (snoozeBtn) snoozeBtn.textContent = 'Snooze ' + cfg.snooze + ' min';
+        const snoozeBtn = document.getElementById('nudgeSnooze_' + kind); if (snoozeBtn) snoozeBtn.textContent = 'Snooze ' + cfg.snooze + ' min';
 
-        modal.classList.add('open');
-        this.sendDesktopNotification(def.notifyTitle, def.notifyBody, false, def.tag);
-
+        modal.classList.add('open'); this.sendDesktopNotification(def.notifyTitle, def.notifyBody, false, def.tag);
         if (!state.soundInterval) {
-            this.playBeepPair();
-            state.soundInterval = setInterval(() => { this.playBeepPair(); }, 1800);
+            this.playBeepPair(); state.soundInterval = setInterval(() => { this.playBeepPair(); }, 1800);
             if (state.soundTimeout) clearTimeout(state.soundTimeout);
-            state.soundTimeout = setTimeout(() => {
-                if (state.soundInterval) { clearInterval(state.soundInterval); state.soundInterval = null; }
-            }, 30000);
+            state.soundTimeout = setTimeout(() => { if (state.soundInterval) { clearInterval(state.soundInterval); state.soundInterval = null; } }, 30000);
         }
     },
 
     stopNudge(kind) {
-        const state = this.nudgeState[kind] || (this.nudgeState[kind] = {});
-        const modal = document.getElementById('nudgeModal_' + kind);
+        const state = this.nudgeState[kind] || (this.nudgeState[kind] = {}); const modal = document.getElementById('nudgeModal_' + kind);
         if (modal) modal.classList.remove('open');
         if (state.soundInterval) { clearInterval(state.soundInterval); state.soundInterval = null; }
         if (state.soundTimeout) { clearTimeout(state.soundTimeout); state.soundTimeout = null; }
-        state.showing = false;
-        this.renderNudgeSettings(kind);
+        state.showing = false; this.renderNudgeSettings(kind);
     },
-
-    nudgeDone(kind) {
-        this.stopNudge(kind);
-        (this.nudgeState[kind] || {}).snoozeUntil = 0;
-    },
-
-    snoozeNudge(kind) {
-        const mins = this.nudgeCfg(kind).snooze;
-        (this.nudgeState[kind] || (this.nudgeState[kind] = {})).snoozeUntil = Date.now() + mins * 60000;
-        this.stopNudge(kind);
-        this.showToast('Reminder snoozed for ' + mins + ' minutes', 'info');
-    },
-
-    nudgeOffForToday(kind) {
-        localStorage.setItem(this.nudgeKeys(kind).skip, this.getLocalDateStr(new Date()));
-        this.stopNudge(kind);
-        this.showToast('No more reminders today', 'info');
-    },
+    nudgeDone(kind) { this.stopNudge(kind); (this.nudgeState[kind] || {}).snoozeUntil = 0; },
+    snoozeNudge(kind) { const mins = this.nudgeCfg(kind).snooze; (this.nudgeState[kind] || (this.nudgeState[kind] = {})).snoozeUntil = Date.now() + mins * 60000; this.stopNudge(kind); this.showToast('Reminder snoozed for ' + mins + ' minutes', 'info'); },
+    nudgeOffForToday(kind) { localStorage.setItem(this.nudgeKeys(kind).skip, this.getLocalDateStr(new Date())); this.stopNudge(kind); this.showToast('No more reminders today', 'info'); },
 
     renderNudgeSettings(kind) {
         if (!kind) { Object.keys(this.NUDGES).forEach(k => this.renderNudgeSettings(k)); return; }
-        const cfg = this.nudgeCfg(kind);
-        const set = (id, val) => { const el = document.getElementById(id); if (el && el.value !== String(val)) el.value = val; };
-        set(kind + 'Start', cfg.start);
-        set(kind + 'End', cfg.end);
-        set(kind + 'Every', cfg.every);
-
-        const btn = document.getElementById(kind + 'Toggle');
-        const lbl = document.getElementById(kind + 'ToggleLabel');
-        if (btn) btn.classList.toggle('is-off', !cfg.on);
-        if (lbl) lbl.textContent = cfg.on ? 'Reminder on' : 'Reminder off';
-
-        const hint = document.getElementById(kind + 'NextHint');
-        if (!hint) return;
+        const cfg = this.nudgeCfg(kind); const set = (id, val) => { const el = document.getElementById(id); if (el && el.value !== String(val)) el.value = val; };
+        set(kind + 'Start', cfg.start); set(kind + 'End', cfg.end); set(kind + 'Every', cfg.every);
+        const btn = document.getElementById(kind + 'Toggle'); const lbl = document.getElementById(kind + 'ToggleLabel');
+        if (btn) btn.classList.toggle('is-off', !cfg.on); if (lbl) lbl.textContent = cfg.on ? 'Reminder on' : 'Reminder off';
+        const hint = document.getElementById(kind + 'NextHint'); if (!hint) return;
         if (!cfg.on) { hint.textContent = 'Reminders are off.'; return; }
         const now = new Date();
-        if (localStorage.getItem(this.nudgeKeys(kind).skip) === this.getLocalDateStr(now)) {
-            hint.textContent = 'Skipped for the rest of today.';
-            return;
-        }
-        const next = this.nudgeNextSlot(cfg, now.getHours() * 60 + now.getMinutes());
-        const slots = this.nudgeSlots(cfg);
-        hint.textContent = (next
-            ? 'Next nudge at ' + this.formatTimeStr(this.nudgeToClock(next)) + '.'
-            : 'Done for today — next one tomorrow at ' + this.formatTimeStr(cfg.start) + '.') +
-            ' ' + slots.length + ' a day: ' + slots.map(m => this.formatTimeStr(this.nudgeToClock(m))).join(', ') + '.';
+        if (localStorage.getItem(this.nudgeKeys(kind).skip) === this.getLocalDateStr(now)) { hint.textContent = 'Skipped for the rest of today.'; return; }
+        const next = this.nudgeNextSlot(cfg, now.getHours() * 60 + now.getMinutes()); const slots = this.nudgeSlots(cfg);
+        hint.textContent = (next ? 'Next nudge at ' + this.formatTimeStr(this.nudgeToClock(next)) + '.' : 'Done for today — next one tomorrow at ' + this.formatTimeStr(cfg.start) + '.') + ' ' + slots.length + ' a day: ' + slots.map(m => this.formatTimeStr(this.nudgeToClock(m))).join(', ') + '.';
     },
 
     copyToClipboard(text, btnEl) {
         if (!text) { this.showToast('Nothing to copy', 'info'); return; }
         navigator.clipboard.writeText(text).then(() => {
             if (!btnEl) { this.showToast('Copied', 'success'); return; }
-            const original = btnEl.innerHTML;
-            btnEl.innerHTML = this.SVGS.copied;
-            btnEl.classList.add('done');
+            const original = btnEl.innerHTML; btnEl.innerHTML = this.SVGS.copied; btnEl.classList.add('done');
             setTimeout(() => { btnEl.innerHTML = original; btnEl.classList.remove('done'); }, 1600);
         }).catch(() => this.showToast('Could not copy', 'error'));
     },
@@ -1313,10 +1209,8 @@ const app = {
     /* ---------- LISTS ---------- */
     loadLists() {
         const defaultLists = {
-            categories: [],
-            priorities: ['High', 'Medium', 'Low'],
-            statuses: ['Pending', 'In-Progress', 'Completed'],
-            pendingWith: ['Self', 'Banking Team', 'Finance Manager', 'Vendor', 'Customer']
+            categories: [], priorities: ['High', 'Medium', 'Low'],
+            statuses: ['Pending', 'In-Progress', 'Completed'], pendingWith: ['Self', 'Banking Team', 'Finance Manager', 'Vendor', 'Customer']
         };
         try {
             let stored = localStorage.getItem(CONFIG.LISTS_KEY);
@@ -1328,16 +1222,6 @@ const app = {
             this.lists = stored ? Object.assign({}, defaultLists, JSON.parse(stored)) : defaultLists;
         } catch (e) { this.lists = defaultLists; }
         this.listsUpdatedAt = Number(localStorage.getItem(CONFIG.LISTS_TS_KEY)) || 0;
-
-        if (!localStorage.getItem('pureEnergyCatsCleared')) {
-            localStorage.setItem('pureEnergyCatsCleared', '1');
-            if (this.lists.categories && this.lists.categories.length) {
-                this.lists.categories = [];
-                this.listsUpdatedAt = Date.now();
-                localStorage.setItem(CONFIG.LISTS_TS_KEY, String(this.listsUpdatedAt));
-                localStorage.setItem(CONFIG.LISTS_KEY, JSON.stringify(this.lists));
-            }
-        }
     },
 
     saveLists(bump = true) {
@@ -1393,10 +1277,7 @@ const app = {
 
     clearList() {
         const key = this.editingListKey;
-        if (key === 'priorities' || key === 'statuses') {
-            this.showToast('Priorities and statuses cannot be emptied.', 'warning');
-            return;
-        }
+        if (key === 'priorities' || key === 'statuses') { this.showToast('Priorities and statuses cannot be emptied.', 'warning'); return; }
         const count = (this.lists[key] || []).length;
         if (!count) { this.showToast('Already empty', 'info'); return; }
         if (!confirm(`Remove all ${count} options from this list?`)) return;
@@ -1408,16 +1289,11 @@ const app = {
     },
 
     deleteListOption(index) {
-        if (this.editingListKey === 'statuses' && this.lists.statuses[index] === 'Completed') {
-            this.showToast("'Completed' status cannot be deleted.", "error");
-            return;
-        }
+        if (this.editingListKey === 'statuses' && this.lists.statuses[index] === 'Completed') { this.showToast("'Completed' status cannot be deleted.", "error"); return; }
         const removed = this.lists[this.editingListKey][index];
         const inUse = this.tasks.filter(t => !t.deleted && (
-            (this.editingListKey === 'categories' && t.category === removed) ||
-            (this.editingListKey === 'priorities' && t.priority === removed) ||
-            (this.editingListKey === 'statuses' && t.status === removed) ||
-            (this.editingListKey === 'pendingWith' && t.pendingWith === removed)
+            (this.editingListKey === 'categories' && t.category === removed) || (this.editingListKey === 'priorities' && t.priority === removed) ||
+            (this.editingListKey === 'statuses' && t.status === removed) || (this.editingListKey === 'pendingWith' && t.pendingWith === removed)
         )).length;
         if (inUse > 0 && !confirm(`"${removed}" is used by ${inUse} entries. Delete anyway?`)) return;
 
@@ -1434,21 +1310,13 @@ const app = {
                 const legacy = localStorage.getItem('pureEnergyBankingTasks');
                 const migratedTo = localStorage.getItem(CONFIG.LEGACY_MIGRATED_KEY);
                 if (legacy && legacy !== '[]' && (!migratedTo || migratedTo === this.currentUser)) {
-                    stored = legacy;
-                    localStorage.setItem(CONFIG.STORAGE_KEY, legacy);
-                    localStorage.setItem(CONFIG.LEGACY_MIGRATED_KEY, this.currentUser);
+                    stored = legacy; localStorage.setItem(CONFIG.STORAGE_KEY, legacy); localStorage.setItem(CONFIG.LEGACY_MIGRATED_KEY, this.currentUser);
                 }
             }
             this.tasks = stored ? JSON.parse(stored) : [];
             if (!Array.isArray(this.tasks)) this.tasks = [];
-            this.tasks.forEach(t => {
-                if (!t.id) t.id = this.newId();
-                if (!t.updatedAt) t.updatedAt = 0;
-            });
-        } catch (e) {
-            console.error('Could not read local data:', e);
-            this.tasks = [];
-        }
+            this.tasks.forEach(t => { if (!t.id) t.id = this.newId(); if (!t.updatedAt) t.updatedAt = 0; });
+        } catch (e) { console.error('Could not read local data:', e); this.tasks = []; }
     },
 
     saveData() {
@@ -1456,9 +1324,7 @@ const app = {
             const blob = JSON.stringify(this.tasks);
             localStorage.setItem(CONFIG.STORAGE_KEY, blob);
             this.checkStorageHeadroom(blob.length);
-        } catch (e) {
-            this.showToast("Local storage full — export a CSV backup and empty the Bin.", "error");
-        }
+        } catch (e) { this.showToast("Local storage full — export a CSV backup and empty the Bin.", "error"); }
         this.updateStats();
         if (this.currentTab === 'Dashboard') this.renderDashboard();
     },
@@ -1480,361 +1346,117 @@ const app = {
     },
 
     /* ---------- MULTI SELECT FILTERS ---------- */
-    msPairs: {
-        'ms-category': 'filterCategoryOpts',
-        'ms-priority': 'filterPriorityOpts',
-        'ms-status': 'filterStatusOpts',
-        'ms-category-completed': 'filterCategoryCompletedOpts'
-    },
+    msPairs: { 'ms-category': 'filterCategoryOpts', 'ms-priority': 'filterPriorityOpts', 'ms-status': 'filterStatusOpts', 'ms-category-completed': 'filterCategoryCompletedOpts' },
 
     detachDropdowns() {
         Object.keys(this.msPairs).forEach(wrapId => {
             const panel = document.getElementById(this.msPairs[wrapId]);
-            if (panel && panel.parentElement !== document.body) {
-                panel.dataset.owner = wrapId;
-                document.body.appendChild(panel);
-            }
+            if (panel && panel.parentElement !== document.body) { panel.dataset.owner = wrapId; document.body.appendChild(panel); }
         });
     },
-
     closeDropdowns() {
         Object.keys(this.msPairs).forEach(wrapId => {
-            const wrap = document.getElementById(wrapId);
-            const panel = document.getElementById(this.msPairs[wrapId]);
-            if (wrap) wrap.classList.remove('open');
-            if (panel) panel.classList.remove('open');
+            const wrap = document.getElementById(wrapId); const panel = document.getElementById(this.msPairs[wrapId]);
+            if (wrap) wrap.classList.remove('open'); if (panel) panel.classList.remove('open');
         });
-        const sortPanel = document.getElementById('sortMenuPanel');
-        if (sortPanel) sortPanel.classList.remove('open');
+        const sortPanel = document.getElementById('sortMenuPanel'); if (sortPanel) sortPanel.classList.remove('open');
     },
-
     toggleDropdown(id) {
-        const panel = document.getElementById(this.msPairs[id]);
-        const wrap = document.getElementById(id);
-        if (!panel || !wrap) return;
-
-        const wasOpen = panel.classList.contains('open');
-        this.closeDropdowns();
-        if (!wasOpen) {
-            wrap.classList.add('open');
-            panel.classList.add('open');
-            this.positionDropdown(id);
-        }
+        const panel = document.getElementById(this.msPairs[id]); const wrap = document.getElementById(id); if (!panel || !wrap) return;
+        const wasOpen = panel.classList.contains('open'); this.closeDropdowns();
+        if (!wasOpen) { wrap.classList.add('open'); panel.classList.add('open'); this.positionDropdown(id); }
     },
-
     positionDropdown(id) {
-        const wrap = document.getElementById(id);
-        if (!wrap || !wrap.classList.contains('open')) return;
-
-        const header = wrap.querySelector('.ms-header');
-        const panel = document.getElementById(this.msPairs[id]);
-        if (!header || !panel) return;
-
-        const r = header.getBoundingClientRect();
-        const gap = 6;
-        const below = window.innerHeight - r.bottom - 12;
-        const above = r.top - 12;
+        const wrap = document.getElementById(id); if (!wrap || !wrap.classList.contains('open')) return;
+        const header = wrap.querySelector('.ms-header'); const panel = document.getElementById(this.msPairs[id]); if (!header || !panel) return;
+        const r = header.getBoundingClientRect(); const gap = 6; const below = window.innerHeight - r.bottom - 12; const above = r.top - 12;
         const dropDown = below >= 200 || below >= above;
-
-        const width = Math.max(r.width, 210);
-        let left = r.left;
-        if (left + width > window.innerWidth - 8) left = window.innerWidth - width - 8;
-        if (left < 8) left = 8;
-
-        panel.style.width = width + 'px';
-        panel.style.left = left + 'px';
-        panel.style.maxHeight = Math.max(150, Math.min(320, dropDown ? below : above)) + 'px';
-
-        if (dropDown) {
-            panel.style.top = (r.bottom + gap) + 'px';
-            panel.style.bottom = 'auto';
-        } else {
-            panel.style.top = 'auto';
-            panel.style.bottom = (window.innerHeight - r.top + gap) + 'px';
-        }
+        const width = Math.max(r.width, 210); let left = r.left; if (left + width > window.innerWidth - 8) left = window.innerWidth - width - 8; if (left < 8) left = 8;
+        panel.style.width = width + 'px'; panel.style.left = left + 'px'; panel.style.maxHeight = Math.max(150, Math.min(320, dropDown ? below : above)) + 'px';
+        if (dropDown) { panel.style.top = (r.bottom + gap) + 'px'; panel.style.bottom = 'auto'; } 
+        else { panel.style.top = 'auto'; panel.style.bottom = (window.innerHeight - r.top + gap) + 'px'; }
     },
-
     renderMultiSelect(containerId, labelPrefix, options) {
-        const cont = document.getElementById(containerId);
-        if (!cont) return;
-
-        const currentVals = Array.from(cont.querySelectorAll('input[type="checkbox"]:checked')).map(b => b.value);
-        const hasSelection = currentVals.length > 0;
-        const isChecked = (val) => {
-            if (!hasSelection && val === 'All') return 'checked';
-            return currentVals.includes(val) ? 'checked' : '';
-        };
-
+        const cont = document.getElementById(containerId); if (!cont) return;
+        const currentVals = Array.from(cont.querySelectorAll('input[type="checkbox"]:checked')).map(b => b.value); const hasSelection = currentVals.length > 0;
+        const isChecked = (val) => { if (!hasSelection && val === 'All') return 'checked'; return currentVals.includes(val) ? 'checked' : ''; };
         cont.innerHTML = `<label><input type="checkbox" value="All" onchange="app.handleMultiChange('${containerId}', this)" ${isChecked('All')}> All ${labelPrefix}</label>` +
             options.map(o => `<label><input type="checkbox" value="${this.escAttr(o)}" onchange="app.handleMultiChange('${containerId}', this)" ${isChecked(o)}> ${this.sanitize(o)}</label>`).join('');
-
         this.updateMultiHeader(containerId, labelPrefix);
     },
 
-    SORT_COLUMNS: {
-        Register: [
-            ['dateLogged', 'Logged'], ['description', 'Task'], ['category', 'Category'],
-            ['priority', 'Priority'], ['status', 'Status'], ['pendingWith', 'Pending with'], ['dueDate', 'Due date']
-        ],
-        Completed: [
-            ['dateLogged', 'Logged'], ['description', 'Task'], ['category', 'Category'], ['completedDate', 'Completed on']
-        ],
-        Bin: [
-            ['dateDeleted', 'Deleted on'], ['description', 'Task'], ['category', 'Category']
-        ]
-    },
-
-    openSortMenu(tab, btnEl) {
-        const panel = document.getElementById('sortMenuPanel');
-        if (!panel) return;
-
-        const wasOpenForThis = panel.classList.contains('open') && panel.dataset.owner === btnEl.id;
-        this.closeDropdowns();
-        if (wasOpenForThis) return;
-
-        const cols = this.SORT_COLUMNS[tab] || [];
-        panel.innerHTML = cols.map(([col, label]) => {
-            const active = this.sortCol === col;
-            const arrow = active ? (this.sortAsc ? '↑' : '↓') : '';
-            return `<label class="${active ? 'active' : ''}" data-action="sort-pick" data-col="${this.escAttr(col)}" style="display:flex; align-items:center; gap:10px; padding:10px 14px; font-size:0.88rem; cursor:pointer; border-radius:10px;">
-                <span>${this.sanitize(label)}</span><span class="sort-dir" style="color:var(--accent); font-weight:700;">${arrow}</span>
-            </label>`;
-        }).join('');
-
-        panel.dataset.owner = btnEl.id;
-        panel.classList.add('open');
-
-        const r = btnEl.getBoundingClientRect();
-        const width = Math.max(r.width, 190);
-        let left = r.left;
-        if (left + width > window.innerWidth - 8) left = window.innerWidth - width - 8;
-        panel.style.width = width + 'px';
-        panel.style.left = Math.max(8, left) + 'px';
-
-        const below = window.innerHeight - r.bottom - 12;
-        const above = r.top - 12;
-        if (below >= 180 || below >= above) {
-            panel.style.top = (r.bottom + 6) + 'px';
-            panel.style.bottom = 'auto';
-            panel.style.maxHeight = Math.max(140, Math.min(320, below)) + 'px';
-        } else {
-            panel.style.top = 'auto';
-            panel.style.bottom = (window.innerHeight - r.top + 6) + 'px';
-            panel.style.maxHeight = Math.max(140, Math.min(320, above)) + 'px';
-        }
-    },
-
-    pickSort(col) {
-        if (this.sortCol === col) this.sortAsc = !this.sortAsc;
-        else { this.sortCol = col; this.sortAsc = true; }
-        this.closeDropdowns();
-        this.renderTable();
-    },
-
-    COL_WIDTHS_KEY: 'pureEnergyColWidths',
-
-    colWidthsStore() {
-        try { return JSON.parse(localStorage.getItem(this.COL_WIDTHS_KEY) || '{}'); }
-        catch (e) { return {}; }
-    },
-
-    saveColWidth(table, col, px) {
-        const store = this.colWidthsStore();
-        store[table] = store[table] || {};
-        store[table][col] = px;
-        localStorage.setItem(this.COL_WIDTHS_KEY, JSON.stringify(store));
-    },
-
-    clearColWidth(table, col) {
-        const store = this.colWidthsStore();
-        if (store[table]) { delete store[table][col]; }
-        localStorage.setItem(this.COL_WIDTHS_KEY, JSON.stringify(store));
-    },
-
-    restoreColumnWidths(table) {
-        const store = this.colWidthsStore();
-        const saved = store[table];
-        const colgroup = document.getElementById(table + 'Colgroup');
-        if (!saved || !colgroup) return;
-        const cols = colgroup.querySelectorAll('col');
-        Object.keys(saved).forEach(i => {
-            if (cols[i]) cols[i].style.width = saved[i] + 'px';
-        });
-    },
-
-    fitColumns(table) {
-        const store = this.colWidthsStore();
-        delete store[table];
-        localStorage.setItem(this.COL_WIDTHS_KEY, JSON.stringify(store));
-        const colgroup = document.getElementById(table + 'Colgroup');
-        if (colgroup) colgroup.querySelectorAll('col').forEach(c => { c.style.width = ''; });
-        this.showToast('Columns sized to fit your data', 'success');
-    },
-
-    initColumnResize() {
-        if (window.matchMedia('(max-width: 768px)').matches) return;
-
-        let drag = null; 
-
-        document.addEventListener('mousedown', (e) => {
-            const handle = e.target.closest('.col-resize');
-            if (!handle) return;
-            e.preventDefault();
-
-            const table = handle.dataset.table;
-            const colIndex = Number(handle.dataset.col);
-            const th = handle.closest('th');
-            const colgroup = document.getElementById(table + 'Colgroup');
-            const colEl = colgroup ? colgroup.querySelectorAll('col')[colIndex] : null;
-            if (!th || !colEl) return;
-
-            drag = { table, colIndex, colEl, startX: e.clientX, startWidth: th.getBoundingClientRect().width };
-            handle.classList.add('active');
-            document.body.classList.add('resizing');
-        });
-
-        document.addEventListener('mousemove', (e) => {
-            if (!drag) return;
-            const next = Math.max(60, Math.round(drag.startWidth + (e.clientX - drag.startX)));
-            drag.colEl.style.width = next + 'px';
-        });
-
-        document.addEventListener('mouseup', () => {
-            if (!drag) return;
-            const width = parseInt(drag.colEl.style.width, 10);
-            if (width) this.saveColWidth(drag.table, drag.colIndex, width);
-            document.querySelectorAll('.col-resize.active').forEach(h => h.classList.remove('active'));
-            document.body.classList.remove('resizing');
-            drag = null;
-        });
-
-        document.addEventListener('dblclick', (e) => {
-            const handle = e.target.closest('.col-resize');
-            if (!handle) return;
-            const table = handle.dataset.table;
-            const colIndex = Number(handle.dataset.col);
-            const colgroup = document.getElementById(table + 'Colgroup');
-            const colEl = colgroup ? colgroup.querySelectorAll('col')[colIndex] : null;
-            if (!colEl) return;
-            colEl.style.width = '';
-            this.clearColWidth(table, colIndex);
-        });
-    },
-
     handleMultiChange(containerId, checkbox) {
-        const cont = document.getElementById(containerId);
-        const boxes = Array.from(cont.querySelectorAll('input[type="checkbox"]'));
-        const allBox = boxes.find(b => b.value === 'All');
-
+        const cont = document.getElementById(containerId); const boxes = Array.from(cont.querySelectorAll('input[type="checkbox"]')); const allBox = boxes.find(b => b.value === 'All');
         if (checkbox.value === 'All') {
-            if (checkbox.checked) boxes.forEach(b => { if (b !== checkbox) b.checked = false; });
-            else checkbox.checked = true;
+            if (checkbox.checked) boxes.forEach(b => { if (b !== checkbox) b.checked = false; }); else checkbox.checked = true;
         } else {
             if (checkbox.checked) { if (allBox) allBox.checked = false; }
-            else {
-                const anyChecked = boxes.some(b => b.value !== 'All' && b.checked);
-                if (!anyChecked && allBox) allBox.checked = true;
-            }
+            else { const anyChecked = boxes.some(b => b.value !== 'All' && b.checked); if (!anyChecked && allBox) allBox.checked = true; }
         }
-        this.updateMultiHeader(containerId);
-        this.renderTable();
+        this.updateMultiHeader(containerId); this.renderTable();
     },
 
     updateMultiHeader(containerId, labelPrefix = '') {
-        const cont = document.getElementById(containerId);
-        if (!cont) return;
-
-        if (!labelPrefix) {
-            if (containerId.includes('Category')) labelPrefix = 'Categories';
-            else if (containerId.includes('Priority')) labelPrefix = 'Priorities';
-            else if (containerId.includes('Status')) labelPrefix = 'Statuses';
-        }
-
+        const cont = document.getElementById(containerId); if (!cont) return;
+        if (!labelPrefix) { if (containerId.includes('Category')) labelPrefix = 'Categories'; else if (containerId.includes('Priority')) labelPrefix = 'Priorities'; else if (containerId.includes('Status')) labelPrefix = 'Statuses'; }
         const boxes = Array.from(cont.querySelectorAll('input[type="checkbox"]:checked'));
         const owner = cont.dataset.owner ? document.getElementById(cont.dataset.owner) : cont.parentElement;
-        const header = owner ? owner.querySelector('.ms-header') : null;
-        if (!header) return;
-
-        if (boxes.length === 0 || (boxes.length === 1 && boxes[0].value === 'All')) {
-            header.textContent = `All ${labelPrefix}`;
-            header.style.color = '';
-            header.style.borderColor = '';
-        } else {
-            const vals = boxes.filter(b => b.value !== 'All').map(b => b.value);
-            header.textContent = vals.length === 1 ? vals[0] : `${vals.length} Selected`;
-            header.style.color = 'var(--accent)';
-            header.style.borderColor = 'var(--accent)';
-        }
+        const header = owner ? owner.querySelector('.ms-header') : null; if (!header) return;
+        if (boxes.length === 0 || (boxes.length === 1 && boxes[0].value === 'All')) { header.textContent = `All ${labelPrefix}`; header.style.color = ''; header.style.borderColor = ''; } 
+        else { const vals = boxes.filter(b => b.value !== 'All').map(b => b.value); header.textContent = vals.length === 1 ? vals[0] : `${vals.length} Selected`; header.style.color = 'var(--accent)'; header.style.borderColor = 'var(--accent)'; }
     },
 
     getMultiValues(containerId) {
-        const cont = document.getElementById(containerId);
-        if (!cont) return ['All'];
+        const cont = document.getElementById(containerId); if (!cont) return ['All'];
         const checked = Array.from(cont.querySelectorAll('input[type="checkbox"]:checked')).map(b => b.value);
-        if (checked.includes('All') || checked.length === 0) return ['All'];
-        return checked;
+        if (checked.includes('All') || checked.length === 0) return ['All']; return checked;
     },
 
     setMultiValue(containerId, val) {
-        const cont = document.getElementById(containerId);
-        if (!cont) return;
+        const cont = document.getElementById(containerId); if (!cont) return;
         let boxes = Array.from(cont.querySelectorAll('input[type="checkbox"]'));
-
         if (val && val !== 'All' && !boxes.some(b => b.value === val)) {
-            const label = document.createElement('label');
-            label.innerHTML = '<input type="checkbox" value="' + this.escAttr(val) + '" onchange="app.handleMultiChange(\'' + containerId + '\', this)"> ' + this.sanitize(val);
-            cont.appendChild(label);
-            boxes = Array.from(cont.querySelectorAll('input[type="checkbox"]'));
+            const label = document.createElement('label'); label.innerHTML = '<input type="checkbox" value="' + this.escAttr(val) + '" onchange="app.handleMultiChange(\'' + containerId + '\', this)"> ' + this.sanitize(val);
+            cont.appendChild(label); boxes = Array.from(cont.querySelectorAll('input[type="checkbox"]'));
         }
-
-        boxes.forEach(b => { b.checked = (b.value === val); });
-        this.updateMultiHeader(containerId);
+        boxes.forEach(b => { b.checked = (b.value === val); }); this.updateMultiHeader(containerId);
     },
 
     refreshFilterOptions() {
-        const sig = JSON.stringify([
-            this.lists,
-            Array.from(new Set(this.tasks.map(t => [t.category, t.priority, t.status, t.pendingWith].join('|')))).sort()
-        ]);
+        const sig = JSON.stringify([this.lists, Array.from(new Set(this.tasks.map(t => [t.category, t.priority, t.status, t.pendingWith].join('|')))).sort()]);
         if (sig === this._filterSig) return;
-        if (document.querySelector('.multi-select.open')) return;
+        
+        if (document.querySelector('.multi-select.open') || document.getElementById('taskModal').classList.contains('open')) return;
         this._filterSig = sig;
         this.populateDropdowns();
     },
 
     populateDropdowns() {
         const opt = (v) => `<option value="${this.escAttr(v)}">${this.sanitize(v)}</option>`;
-        document.getElementById('taskCategory').innerHTML = '<option value="">Select Category</option>' + this.lists.categories.map(opt).join('');
-        document.getElementById('taskPriority').innerHTML = this.lists.priorities.map(opt).join('');
-        document.getElementById('taskStatus').innerHTML = this.lists.statuses.map(opt).join('');
-        document.getElementById('taskPendingWith').innerHTML = '<option value="">Select Person</option>' + this.lists.pendingWith.map(opt).join('');
-
-        const union = (base, field) => {
-            const out = [].concat(base);
-            this.tasks.forEach(t => {
-                const v = t[field];
-                if (v && out.indexOf(v) === -1) out.push(v);
-            });
-            return out;
+        
+        const keepValue = (elId, html) => {
+            const el = document.getElementById(elId); if (!el) return;
+            const previous = el.value; el.innerHTML = html;
+            if (previous && Array.from(el.options).some(o => o.value === previous)) el.value = previous;
         };
+
+        keepValue('taskCategory', '<option value="">Select Category</option>' + this.lists.categories.map(opt).join(''));
+        keepValue('taskPriority', this.lists.priorities.map(opt).join(''));
+        keepValue('taskStatus', this.lists.statuses.map(opt).join(''));
+        keepValue('taskPendingWith', '<option value="">Select Person</option>' + this.lists.pendingWith.map(opt).join(''));
+
+        const union = (base, field) => { const out = [].concat(base); this.tasks.forEach(t => { const v = t[field]; if (v && out.indexOf(v) === -1) out.push(v); }); return out; };
         const allCats = union(this.lists.categories, 'category');
 
         this.renderMultiSelect('filterCategoryOpts', 'Categories', allCats);
         this.renderMultiSelect('filterPriorityOpts', 'Priorities', union(this.lists.priorities, 'priority'));
         this.renderMultiSelect('filterStatusOpts', 'Statuses', union(this.lists.statuses, 'status'));
         this.renderMultiSelect('filterCategoryCompletedOpts', 'Categories', allCats);
+        keepValue('filterPending', '<option value="All">All People</option>' + union(this.lists.pendingWith, 'pendingWith').map(opt).join(''));
 
-        // Rebuilding a <select> wipes its value, so remember and restore it —
-        // otherwise a background sync silently drops the filter you just set.
-        const keepValue = (elId, html) => {
-            const el = document.getElementById(elId);
-            if (!el) return;
-            const previous = el.value;
-            el.innerHTML = html;
-            if (previous && Array.from(el.options).some(o => o.value === previous)) el.value = previous;
-        };
-
-        keepValue('filterPending', '<option value="All">All Pending With</option>' + union(this.lists.pendingWith, 'pendingWith').map(opt).join(''));
+        const types = ['USD Holiday', 'Indian Bank Holiday'];
+        this.holidays.forEach(h => { if (h.type && !types.includes(h.type)) types.push(h.type); });
+        keepValue('filterHolidayType', '<option value="All">All Calendars</option>' + types.map(opt).join(''));
     },
 
     setupEventListeners() {
@@ -1844,42 +1466,28 @@ const app = {
             if (document.getElementById('taskModal').classList.contains('open')) { this.closeTaskModal(); return; }
             if (document.getElementById('emailListModal').classList.contains('open')) { document.getElementById('emailListModal').classList.remove('open'); return; }
             if (document.getElementById('syncSetupModal').classList.contains('open')) { document.getElementById('syncSetupModal').classList.remove('open'); return; }
+            if (document.getElementById('holidayModal').classList.contains('open')) { this.closeHolidayModal(); return; }
         });
     },
 
     clearFilters(silent = false) {
         document.getElementById('searchInput').value = '';
-        const doneSearch = document.getElementById('searchCompleted');
-        if (doneSearch) doneSearch.value = '';
-        this.setMultiValue('filterCategoryOpts', 'All');
-        this.setMultiValue('filterPriorityOpts', 'All');
-        this.setMultiValue('filterStatusOpts', 'All');
-        this.setMultiValue('filterCategoryCompletedOpts', 'All');
-
-        document.getElementById('filterPending').value = 'All';
-        document.getElementById('filterDue').value = 'All';
-        document.getElementById('filterPending').classList.remove('active-filter');
-        document.getElementById('filterDue').classList.remove('active-filter');
-
-        this.renderTable();
-        if (silent !== true) this.showToast('Filters cleared', 'success');
+        const doneSearch = document.getElementById('searchCompleted'); if (doneSearch) doneSearch.value = '';
+        this.setMultiValue('filterCategoryOpts', 'All'); this.setMultiValue('filterPriorityOpts', 'All');
+        this.setMultiValue('filterStatusOpts', 'All'); this.setMultiValue('filterCategoryCompletedOpts', 'All');
+        document.getElementById('filterPending').value = 'All'; document.getElementById('filterDue').value = 'All';
+        document.getElementById('filterPending').classList.remove('active-filter'); document.getElementById('filterDue').classList.remove('active-filter');
+        this.renderTable(); if (silent !== true) this.showToast('Filters cleared', 'success');
     },
 
-    SORT_DEFAULTS: {
-        Register:  ['dueDate', true],
-        Completed: ['completedDate', false],
-        Bin:       ['dateDeleted', false]
-    },
+    SORT_DEFAULTS: { Register: ['dueDate', true], Completed: ['completedDate', false], Bin: ['dateDeleted', false] },
     _sortChosen: {},
 
     switchTab(tab) {
         if (tab !== this.currentTab) this.exitSelectMode();
         this.currentTab = tab;
 
-        // Each tab opens on the sort that actually makes sense for it —
-        // Tasks by what is due next — until you pick your own for that tab.
-        const chosen = this._sortChosen[tab];
-        const preset = chosen || this.SORT_DEFAULTS[tab];
+        const chosen = this._sortChosen[tab]; const preset = chosen || this.SORT_DEFAULTS[tab];
         if (preset) { this.sortCol = preset[0]; this.sortAsc = preset[1]; }
 
         document.querySelectorAll('.content-area').forEach(el => el.classList.remove('active'));
@@ -1889,38 +1497,19 @@ const app = {
         const titles = { 'Dashboard': 'Overview', 'Register': 'Tasks', 'Holidays': 'Bank Holidays', 'Config': 'Configuration', 'Completed': 'Done', 'Bin': 'Bin' };
 
         const screen = document.getElementById(tabMap[tab]);
-        if (screen) {
-            screen.classList.add('active');
-            screen.scrollTop = 0;
-        }
+        if (screen) { screen.classList.add('active'); screen.scrollTop = 0; }
 
-        const btn = document.querySelector(`.tabbar-btn[data-tab="${tab}"]`);
-        if (btn) btn.classList.add('active');
+        const btn = document.querySelector(`.tabbar-btn[data-tab="${tab}"]`); if (btn) btn.classList.add('active');
         document.getElementById('screenTitle').textContent = titles[tab] || tab;
 
         this.renderTable();
     },
 
-    toggleFilters() {
-        const bar = document.getElementById('registerFilters');
-        if (bar) {
-            const on = bar.classList.toggle('open');
-            const toggle = document.getElementById('filterToggle');
-            if (toggle) toggle.classList.toggle('is-on', on);
-        }
-    },
-
     isDateInRange(t, mode) {
         if (!t.dueDate) return false;
-        if (mode === 'Overdue') {
-            const dt = this.getTaskDueDateTime(t);
-            return !!dt && dt < new Date();
-        }
-        const [y, m, d] = String(t.dueDate).split('-').map(Number);
-        if (!y || !m || !d) return false;
-        const target = new Date(y, m - 1, d);
-        const now = new Date();
-        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        if (mode === 'Overdue') { const dt = this.getTaskDueDateTime(t); return !!dt && dt < new Date(); }
+        const [y, m, d] = String(t.dueDate).split('-').map(Number); if (!y || !m || !d) return false;
+        const target = new Date(y, m - 1, d); const now = new Date(); const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
         const diffDays = Math.round((target - today) / (1000 * 60 * 60 * 24));
 
         if (mode === 'Today') return diffDays === 0;
@@ -1939,55 +1528,30 @@ const app = {
         return false;
     },
 
-    /* ---------- SORTING & RENDERING ---------- */
+    /* ---------- SORTING & COLUMNS ---------- */
     updateSortHeaders() {
         const getIcon = (col) => this.sortCol === col ? (this.sortAsc ? '↑' : '↓') : '↕';
         const handle = (table, i) => `<span class="col-resize" data-table="${table}" data-col="${i}"></span>`;
-
         if (this.currentTab === 'Register') {
             document.getElementById('registerTableHead').innerHTML = `
-                <tr>
-                    <th onclick="app.sortTable('dateLogged')">Logged<span>${getIcon('dateLogged')}</span>${handle('register', 0)}</th>
-                    <th onclick="app.sortTable('description')">Task<span>${getIcon('description')}</span>${handle('register', 1)}</th>
-                    <th onclick="app.sortTable('category')">Category<span>${getIcon('category')}</span>${handle('register', 2)}</th>
-                    <th onclick="app.sortTable('priority')">Priority<span>${getIcon('priority')}</span>${handle('register', 3)}</th>
-                    <th onclick="app.sortTable('status')">Status<span>${getIcon('status')}</span>${handle('register', 4)}</th>
-                    <th onclick="app.sortTable('pendingWith')">Pending With<span>${getIcon('pendingWith')}</span>${handle('register', 5)}</th>
-                    <th onclick="app.sortTable('dueDate')">Due Date<span>${getIcon('dueDate')}</span>${handle('register', 6)}</th>
-                    <th>Actions${handle('register', 7)}</th>
-                </tr>`;
+                <tr><th onclick="app.sortTable('dateLogged')">Logged<span>${getIcon('dateLogged')}</span>${handle('register', 0)}</th><th onclick="app.sortTable('description')">Task<span>${getIcon('description')}</span>${handle('register', 1)}</th><th onclick="app.sortTable('category')">Category<span>${getIcon('category')}</span>${handle('register', 2)}</th><th onclick="app.sortTable('priority')">Priority<span>${getIcon('priority')}</span>${handle('register', 3)}</th><th onclick="app.sortTable('status')">Status<span>${getIcon('status')}</span>${handle('register', 4)}</th><th onclick="app.sortTable('pendingWith')">Pending With<span>${getIcon('pendingWith')}</span>${handle('register', 5)}</th><th onclick="app.sortTable('dueDate')">Due Date<span>${getIcon('dueDate')}</span>${handle('register', 6)}</th><th>Actions${handle('register', 7)}</th></tr>`;
         } else if (this.currentTab === 'Completed') {
             document.getElementById('completedTableHead').innerHTML = `
-                <tr>
-                    <th onclick="app.sortTable('dateLogged')">Logged<span>${getIcon('dateLogged')}</span>${handle('completed', 0)}</th>
-                    <th onclick="app.sortTable('description')">Task<span>${getIcon('description')}</span>${handle('completed', 1)}</th>
-                    <th onclick="app.sortTable('category')">Category<span>${getIcon('category')}</span>${handle('completed', 2)}</th>
-                    <th onclick="app.sortTable('completedDate')">Completed On<span>${getIcon('completedDate')}</span>${handle('completed', 3)}</th>
-                    <th>Actions${handle('completed', 4)}</th>
-                </tr>`;
+                <tr><th onclick="app.sortTable('dateLogged')">Logged<span>${getIcon('dateLogged')}</span>${handle('completed', 0)}</th><th onclick="app.sortTable('description')">Task<span>${getIcon('description')}</span>${handle('completed', 1)}</th><th onclick="app.sortTable('category')">Category<span>${getIcon('category')}</span>${handle('completed', 2)}</th><th onclick="app.sortTable('completedDate')">Completed On<span>${getIcon('completedDate')}</span>${handle('completed', 3)}</th><th>Actions${handle('completed', 4)}</th></tr>`;
         } else if (this.currentTab === 'Bin') {
             document.getElementById('binTableHead').innerHTML = `
-                <tr>
-                    <th onclick="app.sortTable('dateDeleted')">Deleted On<span>${getIcon('dateDeleted')}</span>${handle('bin', 0)}</th>
-                    <th onclick="app.sortTable('description')">Task<span>${getIcon('description')}</span>${handle('bin', 1)}</th>
-                    <th onclick="app.sortTable('category')">Category<span>${getIcon('category')}</span>${handle('bin', 2)}</th>
-                    <th>Actions${handle('bin', 3)}</th>
-                </tr>`;
+                <tr><th onclick="app.sortTable('dateDeleted')">Deleted On<span>${getIcon('dateDeleted')}</span>${handle('bin', 0)}</th><th onclick="app.sortTable('description')">Task<span>${getIcon('description')}</span>${handle('bin', 1)}</th><th onclick="app.sortTable('category')">Category<span>${getIcon('category')}</span>${handle('bin', 2)}</th><th>Actions${handle('bin', 3)}</th></tr>`;
         }
     },
 
     sortTable(col) {
-        if (this.sortCol === col) this.sortAsc = !this.sortAsc;
-        else { this.sortCol = col; this.sortAsc = true; }
+        if (this.sortCol === col) this.sortAsc = !this.sortAsc; else { this.sortCol = col; this.sortAsc = true; }
         this._sortChosen[this.currentTab] = [this.sortCol, this.sortAsc];
         this.renderTable();
     },
 
     compareTasks(a, b) {
-        const col = this.sortCol;
-        const dir = this.sortAsc ? 1 : -1;
-        let valA, valB;
-
+        const col = this.sortCol; const dir = this.sortAsc ? 1 : -1; let valA, valB;
         if (col === 'priority') {
             const rank = (v) => { const i = this.lists.priorities.indexOf(v); return i === -1 ? 999 : i; };
             valA = rank(a.priority); valB = rank(b.priority);
@@ -1995,26 +1559,100 @@ const app = {
             const dt = (t) => { const d = this.getTaskDueDateTime(t); return d ? d.getTime() : Number.MAX_SAFE_INTEGER; };
             valA = dt(a); valB = dt(b);
         } else {
-            valA = (a[col] || '').toString().toLowerCase();
-            valB = (b[col] || '').toString().toLowerCase();
+            valA = (a[col] || '').toString().toLowerCase(); valB = (b[col] || '').toString().toLowerCase();
         }
-
         if (valA < valB) return -1 * dir;
         if (valA > valB) return 1 * dir;
         return 0;
     },
 
-    renderTable() {
-        this.updateSortHeaders();
-        this.refreshFilterOptions();
-        if (this.currentTab === 'Register') this.renderRegister();
-        else if (this.currentTab === 'Completed') this.renderCompleted();
-        else if (this.currentTab === 'Bin') this.renderBin();
-        else if (this.currentTab === 'Holidays') this.renderHolidays();
-        else if (this.currentTab === 'Dashboard') this.renderDashboard();
+    COL_WIDTHS_KEY: 'pureEnergyColWidths',
+    colWidthsStore() { try { return JSON.parse(localStorage.getItem(this.COL_WIDTHS_KEY) || '{}'); } catch (e) { return {}; } },
+    saveColWidth(table, col, px) { const store = this.colWidthsStore(); store[table] = store[table] || {}; store[table][col] = px; localStorage.setItem(this.COL_WIDTHS_KEY, JSON.stringify(store)); },
+    clearColWidth(table, col) { const store = this.colWidthsStore(); if (store[table]) { delete store[table][col]; } localStorage.setItem(this.COL_WIDTHS_KEY, JSON.stringify(store)); },
+    restoreColumnWidths(table) {
+        const store = this.colWidthsStore(); const saved = store[table]; const colgroup = document.getElementById(table + 'Colgroup');
+        if (!saved || !colgroup) return; const cols = colgroup.querySelectorAll('col');
+        Object.keys(saved).forEach(i => { if (cols[i]) cols[i].style.width = saved[i] + 'px'; });
+    },
+    fitColumns(table) {
+        const store = this.colWidthsStore(); delete store[table]; localStorage.setItem(this.COL_WIDTHS_KEY, JSON.stringify(store));
+        const colgroup = document.getElementById(table + 'Colgroup'); if (colgroup) colgroup.querySelectorAll('col').forEach(c => { c.style.width = ''; });
+        this.showToast('Columns sized to fit your data', 'success');
     },
 
-    /* ---------- HOLIDAYS RENDERING ---------- */
+    initColumnResize() {
+        if (window.matchMedia('(max-width: 768px)').matches) return;
+        let drag = null; 
+        document.addEventListener('mousedown', (e) => {
+            const handle = e.target.closest('.col-resize'); if (!handle) return; e.preventDefault();
+            const table = handle.dataset.table; const colIndex = Number(handle.dataset.col);
+            const th = handle.closest('th'); const colgroup = document.getElementById(table + 'Colgroup');
+            const colEl = colgroup ? colgroup.querySelectorAll('col')[colIndex] : null; if (!th || !colEl) return;
+            drag = { table, colIndex, colEl, startX: e.clientX, startWidth: th.getBoundingClientRect().width };
+            handle.classList.add('active'); document.body.classList.add('resizing');
+        });
+        document.addEventListener('mousemove', (e) => {
+            if (!drag) return; const next = Math.max(60, Math.round(drag.startWidth + (e.clientX - drag.startX))); drag.colEl.style.width = next + 'px';
+        });
+        document.addEventListener('mouseup', () => {
+            if (!drag) return; const width = parseInt(drag.colEl.style.width, 10); if (width) this.saveColWidth(drag.table, drag.colIndex, width);
+            document.querySelectorAll('.col-resize.active').forEach(h => h.classList.remove('active')); document.body.classList.remove('resizing'); drag = null;
+        });
+        document.addEventListener('dblclick', (e) => {
+            const handle = e.target.closest('.col-resize'); if (!handle) return;
+            const table = handle.dataset.table; const colIndex = Number(handle.dataset.col);
+            const colgroup = document.getElementById(table + 'Colgroup'); const colEl = colgroup ? colgroup.querySelectorAll('col')[colIndex] : null;
+            if (!colEl) return; colEl.style.width = ''; this.clearColWidth(table, colIndex);
+        });
+    },
+
+    /* ---------- HOLIDAYS TAB & MANAGER ---------- */
+    HOLIDAYS_KEY: 'pureEnergyCustomHolidays',
+    loadHolidays() {
+        try {
+            const stored = localStorage.getItem(this.HOLIDAYS_KEY);
+            if (stored) { this.holidays = JSON.parse(stored); }
+        } catch(e) {}
+    },
+
+    saveHolidaysList() {
+        localStorage.setItem(this.HOLIDAYS_KEY, JSON.stringify(this.holidays));
+        this.renderHolidays();
+        this.populateDropdowns();
+    },
+
+    openHolidayModal() {
+        document.getElementById('holidayModal').classList.add('open');
+        document.getElementById('holDate').value = '';
+        document.getElementById('holName').value = '';
+        document.getElementById('holType').value = '';
+    },
+
+    closeHolidayModal() {
+        document.getElementById('holidayModal').classList.remove('open');
+    },
+
+    saveHoliday() {
+        const date = document.getElementById('holDate').value;
+        const name = document.getElementById('holName').value.trim();
+        const type = document.getElementById('holType').value.trim() || 'USD Holiday';
+        if (!date || !name) { this.showToast('Please enter both date and name.', 'warning'); return; }
+
+        const id = this.newId();
+        this.holidays.push({ id: id, date: date, name: name, type: type });
+        this.saveHolidaysList();
+        this.closeHolidayModal();
+        this.showToast('Holiday added.', 'success');
+    },
+
+    deleteHoliday(id) {
+        if(!confirm("Remove this holiday?")) return;
+        this.holidays = this.holidays.filter(h => String(h.id) !== String(id) && h.name !== id);
+        this.saveHolidaysList();
+        this.showToast("Holiday removed.", "info");
+    },
+
     renderHolidays() {
         const search = (document.getElementById('searchHolidays')?.value || '').toLowerCase();
         const typeFilter = document.getElementById('filterHolidayType')?.value || 'All';
@@ -2027,30 +1665,90 @@ const app = {
 
         filtered.sort((a, b) => a.date.localeCompare(b.date));
 
-        const tbody = document.getElementById('holidaysTableBody');
-        if (!tbody) return;
-        tbody.innerHTML = '';
+        const alertBox = document.getElementById('holidayAlerts');
+        const box = document.getElementById('holidaysCardList');
+        if (!box) return;
+        box.innerHTML = '';
+        if(alertBox) alertBox.innerHTML = '';
 
         if (filtered.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; padding:40px; color:var(--label-2);">No holidays found.</td></tr>`;
+            box.innerHTML = `<div class="empty-state" style="width: 100%;"><strong>No holidays found</strong><span>Add new holidays to track them here.</span></div>`;
             return;
+        }
+
+        let streaks = [];
+        let currentStreak = [];
+        for (let i = 0; i < filtered.length; i++) {
+            const h = filtered[i];
+            const d = new Date(h.date);
+
+            if (currentStreak.length === 0) {
+                currentStreak.push({ holiday: h, dateObj: d });
+            } else {
+                let lastObj = currentStreak[currentStreak.length - 1];
+                let diffDays = Math.round((d - lastObj.dateObj) / (1000 * 60 * 60 * 24));
+                
+                if (diffDays === 1) {
+                    currentStreak.push({ holiday: h, dateObj: d });
+                } else if (diffDays === 3 && lastObj.dateObj.getDay() === 5 && d.getDay() === 1) {
+                    currentStreak.push({ holiday: h, dateObj: d, bridgedWeekend: true });
+                } else {
+                    const startDay = currentStreak[0].dateObj.getDay();
+                    const endDay = currentStreak[currentStreak.length - 1].dateObj.getDay();
+                    
+                    if (currentStreak.length >= 3 || startDay === 5 || startDay === 1 || endDay === 5 || endDay === 1) {
+                        streaks.push([...currentStreak]);
+                    }
+                    currentStreak = [{ holiday: h, dateObj: d }];
+                }
+            }
+        }
+        
+        if (currentStreak.length > 0) {
+            const startDay = currentStreak[0].dateObj.getDay();
+            const endDay = currentStreak[currentStreak.length - 1].dateObj.getDay();
+            if (currentStreak.length >= 3 || startDay === 5 || startDay === 1 || endDay === 5 || endDay === 1) {
+                streaks.push([...currentStreak]);
+            }
+        }
+
+        if (alertBox && streaks.length > 0) {
+            alertBox.innerHTML = streaks.map(s => {
+                const sDate = s[0].dateObj;
+                const eDate = s[s.length-1].dateObj;
+                let reason = s.length >= 3 ? `(${s.length} consecutive days)` : 
+                            (sDate.getDay() === 5 ? "Friday holiday extending into weekend" : "Monday holiday connecting to weekend");
+                
+                return `<div class="due-hint clash" style="display:flex; margin-bottom: 12px; width: 100%;">
+                    ⚠️ Long Weekend / Continuous Block: ${this.formatDateStr(s[0].holiday.date)} to ${this.formatDateStr(s[s.length-1].holiday.date)} - ${reason}
+                </div>`;
+            }).join('');
         }
 
         const frag = document.createDocumentFragment();
         filtered.forEach(h => {
-            const row = document.createElement('tr');
+            const card = document.createElement('article');
+            card.className = 'tcard'; 
             const typeColor = h.type === 'USD Holiday' ? 'var(--blue-ink)' : 'var(--amber-ink)';
             const typeBg = h.type === 'USD Holiday' ? 'rgba(37, 99, 235, 0.1)' : 'rgba(245, 158, 11, 0.1)';
+            const idToDel = h.id || h.name;
             
-            row.innerHTML = `
-                <td style="font-family: var(--font-num); font-weight: 600; white-space:nowrap;">${this.formatDateStr(h.date)}</td>
-                <td style="font-weight: 700; color: var(--label);">${this.sanitize(h.name)}</td>
-                <td style="font-family: var(--font-num); color: var(--label-2); white-space:nowrap;">${this.formatDateStr(h.nextWorkingDay)}</td>
-                <td><span style="display:inline-flex; align-items:center; padding:4px 10px; font-size:0.75rem; font-weight:700; border-radius:12px; color:${typeColor}; background:${typeBg}; border:1px solid ${typeBg.replace('0.1', '0.2')}">${this.sanitize(h.type)}</span></td>
-            `;
-            frag.appendChild(row);
+            card.innerHTML = `
+                <div class="tcard-title" style="margin-bottom: 8px;">${this.sanitize(h.name)}</div>
+                <div class="tcard-body">
+                    <div class="tcard-chips">
+                        <span class="chip" style="color:${typeColor}; background:${typeBg}; border-color:${typeBg.replace('0.1', '0.2')}">${this.sanitize(h.type)} Calendar</span>
+                    </div>
+                    <div class="tcard-foot">
+                        <span class="tcard-due">${this.formatDateStr(h.date, { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric' })}</span>
+                        <div class="tcard-actions">
+                            <button type="button" class="btn-icon bad" data-action="holiday-del" data-id="${this.escAttr(idToDel)}" title="Delete Holiday">${this.SVGS.bin}</button>
+                        </div>
+                    </div>
+                </div>`;
+            frag.appendChild(card);
         });
-        tbody.appendChild(frag);
+        box.appendChild(frag);
     },
 
     renderRegister() {
@@ -2300,16 +1998,9 @@ const app = {
         box.appendChild(frag);
     },
 
-
-    /* ---------- WHOLE-RECORD TAP TO EDIT ---------- */
     handleRecordClick(e) {
-        // A swipe ends in a click event; don't open the editor on the way out.
         if (this._swipeAt && Date.now() - this._swipeAt < 500) return;
-
-        // Ignore anything that is already interactive in its own right.
         if (e.target.closest('a, button, input, textarea, select, label, .col-resize, .ms-options, .modal, #sortMenuPanel')) return;
-
-        // Ignore a click that was really the end of a text selection / drag.
         const sel = window.getSelection && window.getSelection();
         if (sel && String(sel).trim().length > 2) return;
 
@@ -2326,7 +2017,6 @@ const app = {
         this.openTaskModal(host.dataset.recordId);
     },
 
-    /* ---------- TASK MODAL & CRUD ---------- */
     setSelectValue(elId, val) {
         const el = document.getElementById(elId);
         if (!el) return;
@@ -2494,7 +2184,6 @@ const app = {
         const nextDue = this.getLocalDateStr(next);
         const seriesId = t.seriesId || String(t.id);
 
-        // Don't spawn a second copy if this occurrence already exists.
         const exists = this.tasks.some(x => !x.purged && String(x.seriesId || '') === seriesId && x.dueDate === nextDue);
         if (exists) return null;
 
@@ -2546,7 +2235,6 @@ const app = {
     undoComplete(id, spawnedId) {
         if (spawnedId) {
             const spawned = this.findTask(spawnedId);
-            // Only drop the auto-created occurrence if it is still untouched.
             if (spawned && !spawned.completedDate && !spawned.deleted) {
                 this.tasks = this.tasks.filter(t => String(t.id) !== String(spawnedId));
             }
@@ -2675,8 +2363,6 @@ const app = {
         return 'var(--violet)';
     },
 
-    // Returns [label, count, rawValue] sorted by count. rawValue is '' for blanks,
-    // which the chart renders as a non-clickable row.
     dashGroup(tasks, field, blankLabel, order) {
         const map = new Map();
         tasks.forEach(t => {
@@ -2707,7 +2393,7 @@ const app = {
         return '' +
             '<button type="button" class="stat-tile" style="--tint:' + cfg.colour + '"' +
             ' data-action="dash-filter" data-ftype="' + this.escAttr(cfg.ftype) + '"' +
-            ' data-fvalue="' + this.escAttr(cfg.fvalue) + '" title="Show these in Tasks">' +
+            ' data-fvalue="' + this.escAttr(cfg.fvalue) + '" title="Open in Tasks">' +
             '<span class="stat-num">' + cfg.count + '</span>' +
             '<span class="stat-label">' + this.sanitize(cfg.title) + '</span>' +
             '<span class="stat-sub">' + this.sanitize(cfg.sub) + '</span>' +
@@ -2746,7 +2432,6 @@ const app = {
         if (!heroBox || !chartBox) return;
 
         const live = this.tasks.filter(t => !t.deleted && !t.purged);
-
         const open = live.filter(t => t.status !== 'Completed');
         const done = live.filter(t => t.status === 'Completed');
 
@@ -2757,7 +2442,12 @@ const app = {
         const monthName = new Date().toLocaleDateString('en-IN', { month: 'long' });
         const noDue = open.filter(t => !t.dueDate);
 
-        /* ---- greeting ---- */
+        const holidaysNext7 = this.holidays.filter(h => {
+            const d = new Date(h.date);
+            const diff = Math.round((d - new Date()) / (1000 * 60 * 60 * 24));
+            return diff >= 0 && diff <= 7;
+        });
+
         if (greetBox) {
             const hr = new Date().getHours();
             const part = hr < 12 ? 'Good morning' : (hr < 17 ? 'Good afternoon' : 'Good evening');
@@ -2780,12 +2470,11 @@ const app = {
                 '<span class="greet-hint">Tap any card to open it in Tasks</span></div><p>' + line + '</p>';
         }
 
-        /* ---- due-date cards ---- */
         heroBox.innerHTML = [
             this.dashTile({
-                title: 'Due Today', count: dueToday.length, colour: 'var(--blue)',
+                title: 'Pending Today', count: dueToday.length, colour: 'var(--blue)',
                 ftype: 'due', fvalue: 'Today',
-                sub: dueToday.length ? 'On the clock' : 'Nothing due'
+                sub: dueToday.length ? 'As of now' : 'Nothing due'
             }),
             this.dashTile({
                 title: 'Overdue', count: overdue.length, colour: 'var(--red)',
@@ -2793,7 +2482,12 @@ const app = {
                 sub: overdue.length ? 'Needs attention' : 'All clear'
             }),
             this.dashTile({
-                title: 'Next 7 Days', count: next7.length, colour: 'var(--amber)',
+                title: 'Holidays (Next 7 Days)', count: holidaysNext7.length, colour: 'var(--amber)',
+                ftype: 'holidayNav', fvalue: 'All',
+                sub: holidaysNext7.length ? 'Upcoming closures' : 'No holidays'
+            }),
+            this.dashTile({
+                title: 'Next 7 Days Tasks', count: next7.length, colour: 'var(--amber)',
                 ftype: 'due', fvalue: 'Next7Days',
                 sub: next7.length ? 'Coming up' : 'Week is clear'
             }),
@@ -2809,7 +2503,6 @@ const app = {
             })
         ].join('');
 
-        /* ---- breakdowns, as small tiles ---- */
         const total = open.length;
         chartBox.innerHTML = [
             this.dashSection({
@@ -2840,6 +2533,12 @@ const app = {
     filterFromDashboard(ftype, fvalue) {
         if (!ftype) return;
 
+        if (ftype === 'holidayNav') {
+            this.switchTab('Holidays');
+            this.showToast('Showing Holidays', 'info');
+            return;
+        }
+
         this.clearFilters(true);
 
         if (ftype === 'due') {
@@ -2863,15 +2562,10 @@ const app = {
         this.showToast((labels[ftype] || ftype) + ': ' + (pretty[fvalue] || fvalue), 'info');
     },
 
-
-    /* ---------- TABLE vs CARD VIEW (mobile and desktop together) ---------- */
+    /* ---------- VIEW MODE TOGGLES ---------- */
     VIEW_KEY: 'pureEnergyView',
     viewMode: 'auto',
 
-    /* Which shell to wear: 'mobile' puts the tabs in a floating bar at the
-       bottom, 'desktop' keeps them inline in the header. Decided by the device
-       alone — never by the table/card toggle, so you can read a table on a
-       phone and still get bottom tabs. */
     resolvedShell() {
         if (typeof window.__shell === 'function') return window.__shell();
         const w = window.innerWidth || 1024;
@@ -2982,25 +2676,19 @@ const app = {
 
     /* ---------- BIN HOUSEKEEPING ---------- */
     BIN_KEEP_DAYS: 30,
-
     purgeOldBin() {
         const cutoff = Date.now() - (this.BIN_KEEP_DAYS * 86400000);
         let cleared = 0;
-
         this.tasks.forEach(t => {
             if (!t.deleted || t.purged || !t.dateDeleted) return;
             const p = String(t.dateDeleted).split('-').map(Number);
             if (p.length < 3 || !p[0] || !p[1] || !p[2]) return;
             if (new Date(p[0], p[1] - 1, p[2]).getTime() >= cutoff) return;
-            t.purged = true;
-            t.updatedAt = Date.now();
-            cleared++;
+            t.purged = true; t.updatedAt = Date.now(); cleared++;
         });
-
         if (cleared > 0) {
             this.saveData();
-            this.showToast(cleared + ' bin ' + (cleared === 1 ? 'entry' : 'entries') +
-                ' older than ' + this.BIN_KEEP_DAYS + ' days cleared out.', 'info');
+            this.showToast(cleared + ' bin ' + (cleared === 1 ? 'entry' : 'entries') + ' older than ' + this.BIN_KEEP_DAYS + ' days cleared out.', 'info');
         }
         return cleared;
     },
@@ -3020,10 +2708,19 @@ const app = {
 
         if (!holiday) { hint.style.display = 'none'; hint.innerHTML = ''; return; }
 
-        const next = holiday.nextWorkingDay;
-        hint.innerHTML = '<span>' + this.sanitize(holiday.name) + ' — banks are closed that day.</span>' +
-            (next ? '<button type="button" onclick="app.useNextWorkingDay(\'' + this.escAttr(next) +
-                '\')">Move to ' + this.formatDateStr(next, { day: 'numeric', month: 'short' }) + '</button>' : '');
+        let nextStr = "";
+        let attempt = new Date(holiday.date);
+        for(let i=0; i<14; i++) {
+            attempt.setDate(attempt.getDate() + 1);
+            let ds = this.getLocalDateStr(attempt);
+            if (!this.holidayOn(ds) && attempt.getDay() !== 0 && attempt.getDay() !== 6) {
+                nextStr = ds; break;
+            }
+        }
+
+        hint.innerHTML = '<span>' + this.sanitize(holiday.name) + ' — holiday closure.</span>' +
+            (nextStr ? '<button type="button" onclick="app.useNextWorkingDay(\'' + this.escAttr(nextStr) +
+                '\')">Move to ' + this.formatDateStr(nextStr, { day: 'numeric', month: 'short' }) + '</button>' : '');
         hint.style.display = 'flex';
     },
 
@@ -3033,37 +2730,25 @@ const app = {
         this.checkDueHoliday();
     },
 
-    /* ---------- TIME SLOTS ----------
-       A task with a due time holds the clock for the next few minutes, so two
-       jobs can't be booked on top of each other. Window length set in Config. */
+    /* ---------- TIME SLOTS ---------- */
     SLOT_KEY: 'pureEnergySlotCfg',
     SLOT_DEFAULTS: { on: true, minutes: 10 },
 
     slotCfg() {
         let saved = {};
-        try {
-            const raw = JSON.parse(localStorage.getItem(this.SLOT_KEY) || '{}');
-            if (raw && typeof raw === 'object') saved = raw;
-        } catch (e) {}
+        try { const raw = JSON.parse(localStorage.getItem(this.SLOT_KEY) || '{}'); if (raw && typeof raw === 'object') saved = raw; } catch (e) {}
         const cfg = Object.assign({}, this.SLOT_DEFAULTS, saved);
         cfg.minutes = Math.max(1, Math.min(240, Number(cfg.minutes) || this.SLOT_DEFAULTS.minutes));
         return cfg;
     },
-
     saveSlotCfg(patch) {
         const cfg = Object.assign(this.slotCfg(), patch || {});
         localStorage.setItem(this.SLOT_KEY, JSON.stringify(cfg));
-        this.renderSlotSettings();
-        this.checkSlotAvailability();
+        this.renderSlotSettings(); this.checkSlotAvailability();
         return cfg;
     },
+    toggleSlots() { const cfg = this.saveSlotCfg({ on: !this.slotCfg().on }); this.showToast(cfg.on ? 'Slot holding on' : 'Slot holding off', 'info'); },
 
-    toggleSlots() {
-        const cfg = this.saveSlotCfg({ on: !this.slotCfg().on });
-        this.showToast(cfg.on ? 'Slot holding on' : 'Slot holding off', 'info');
-    },
-
-    // The task already holding this date and time, if any.
     slotClash(dateStr, timeStr, ignoreId) {
         const cfg = this.slotCfg();
         if (!cfg.on || !dateStr || !timeStr) return null;
@@ -3080,7 +2765,6 @@ const app = {
         }) || null;
     },
 
-    // First time from this one onwards where nothing else is booked.
     nextFreeTime(dateStr, timeStr, ignoreId) {
         const cfg = this.slotCfg();
         let mins = this.nudgeToMinutes(timeStr, -1);
@@ -3094,178 +2778,93 @@ const app = {
         return null;
     },
 
-    // Live hint under the due date and time in the task modal.
     checkSlotAvailability() {
-        const hint = document.getElementById('dueSlotHint');
-        if (!hint) return;
-
-        const dateEl = document.getElementById('taskDueDate');
-        const timeEl = document.getElementById('taskDueTime');
-        const dateStr = dateEl ? dateEl.value : '';
-        const timeStr = timeEl ? timeEl.value : '';
-        const cfg = this.slotCfg();
+        const hint = document.getElementById('dueSlotHint'); if (!hint) return;
+        const dateEl = document.getElementById('taskDueDate'); const timeEl = document.getElementById('taskDueTime');
+        const dateStr = dateEl ? dateEl.value : ''; const timeStr = timeEl ? timeEl.value : ''; const cfg = this.slotCfg();
 
         const clash = this.slotClash(dateStr, timeStr, this.editingId);
         if (!clash) {
-            hint.classList.remove('clash');
-            hint.classList.add('ok');
+            hint.classList.remove('clash'); hint.classList.add('ok');
             if (!cfg.on || !dateStr || !timeStr) { hint.style.display = 'none'; hint.innerHTML = ''; return; }
-            hint.innerHTML = '<span>Slot free — this entry holds ' + this.formatTimeStr(timeStr) +
-                ' to ' + this.formatTimeStr(this.nudgeToClock(this.nudgeToMinutes(timeStr, 0) + cfg.minutes)) + '.</span>';
-            hint.style.display = 'flex';
-            return;
+            hint.innerHTML = '<span>Slot free — this entry holds ' + this.formatTimeStr(timeStr) + ' to ' + this.formatTimeStr(this.nudgeToClock(this.nudgeToMinutes(timeStr, 0) + cfg.minutes)) + '.</span>';
+            hint.style.display = 'flex'; return;
         }
 
         const free = this.nextFreeTime(dateStr, timeStr, this.editingId);
-        hint.classList.remove('ok');
-        hint.classList.add('clash');
-        hint.innerHTML = '<span>' + this.sanitize(clash.description) + ' already holds ' +
-            this.formatTimeStr(clash.dueTime) + '.</span>' +
-            (free ? '<button type="button" onclick="app.useSlotTime(\'' + this.escAttr(free) + '\')">Use ' +
-                this.formatTimeStr(free) + '</button>' : '');
+        hint.classList.remove('ok'); hint.classList.add('clash');
+        hint.innerHTML = '<span>' + this.sanitize(clash.description) + ' already holds ' + this.formatTimeStr(clash.dueTime) + '.</span>' +
+            (free ? '<button type="button" onclick="app.useSlotTime(\'' + this.escAttr(free) + '\')">Use ' + this.formatTimeStr(free) + '</button>' : '');
         hint.style.display = 'flex';
     },
-
-    useSlotTime(timeStr) {
-        const timeEl = document.getElementById('taskDueTime');
-        if (timeEl) timeEl.value = timeStr;
-        this.checkSlotAvailability();
-    },
-
+    useSlotTime(timeStr) { const timeEl = document.getElementById('taskDueTime'); if (timeEl) timeEl.value = timeStr; this.checkSlotAvailability(); },
     renderSlotSettings() {
-        const cfg = this.slotCfg();
-        const mins = document.getElementById('slotMinutes');
+        const cfg = this.slotCfg(); const mins = document.getElementById('slotMinutes');
         if (mins && mins.value !== String(cfg.minutes)) mins.value = cfg.minutes;
-
-        const btn = document.getElementById('slotToggle');
-        const lbl = document.getElementById('slotToggleLabel');
-        if (btn) btn.classList.toggle('is-off', !cfg.on);
-        if (lbl) lbl.textContent = cfg.on ? 'Holding on' : 'Holding off';
-
+        const btn = document.getElementById('slotToggle'); const lbl = document.getElementById('slotToggleLabel');
+        if (btn) btn.classList.toggle('is-off', !cfg.on); if (lbl) lbl.textContent = cfg.on ? 'Holding on' : 'Holding off';
         const hint = document.getElementById('slotHint');
         if (hint) {
-            hint.textContent = cfg.on
-                ? 'A task due at 11:15 AM holds the clock until ' +
-                  this.formatTimeStr(this.nudgeToClock(675 + cfg.minutes)) + '. Nothing else can be scheduled inside that window.'
+            hint.textContent = cfg.on ? 'A task due at 11:15 AM holds the clock until ' + this.formatTimeStr(this.nudgeToClock(675 + cfg.minutes)) + '. Nothing else can be scheduled inside that window.'
                 : 'Two tasks can share the same time.';
         }
     },
 
-    /* ---------- LOCAL STORAGE HEADROOM ---------- */
+    /* ---------- STORAGE ---------- */
     STORAGE_LIMIT: 5 * 1024 * 1024,
-
     checkStorageHeadroom(bytes) {
-        const used = bytes / this.STORAGE_LIMIT;
-        if (used < 0.8) { this._quotaWarned = false; return; }
-        if (this._quotaWarned) return;
-        this._quotaWarned = true;
-        this.showToast('Local storage is about ' + Math.round(used * 100) +
-            '% full — export a CSV backup and empty the Bin.', 'warning');
+        const used = bytes / this.STORAGE_LIMIT; if (used < 0.8) { this._quotaWarned = false; return; }
+        if (this._quotaWarned) return; this._quotaWarned = true;
+        this.showToast('Local storage is about ' + Math.round(used * 100) + '% full — export a CSV backup and empty the Bin.', 'warning');
     },
-
 
     /* ---------- BULK SELECT ---------- */
     selectMode: false,
     selected: [],
-
     isSelected(id) { return this.selected.indexOf(String(id)) !== -1; },
-
     toggleSelectMode() {
-        this.selectMode = !this.selectMode;
-        this.selected = [];
+        this.selectMode = !this.selectMode; this.selected = [];
         document.body.classList.toggle('selecting', this.selectMode);
         document.querySelectorAll('.select-toggle').forEach(b => b.classList.toggle('is-on', this.selectMode));
-        this.renderTable();
-        this.updateSelectBar();
+        this.renderTable(); this.updateSelectBar();
         if (this.selectMode) this.showToast('Tap entries to select them.', 'info');
     },
-
     exitSelectMode() {
-        if (!this.selectMode) return;
-        this.selectMode = false;
-        this.selected = [];
-        document.body.classList.remove('selecting');
-        document.querySelectorAll('.select-toggle').forEach(b => b.classList.remove('is-on'));
-        this.updateSelectBar();
+        if (!this.selectMode) return; this.selectMode = false; this.selected = []; document.body.classList.remove('selecting');
+        document.querySelectorAll('.select-toggle').forEach(b => b.classList.remove('is-on')); this.updateSelectBar();
     },
-
     toggleSelect(id) {
-        const key = String(id);
-        const at = this.selected.indexOf(key);
+        const key = String(id); const at = this.selected.indexOf(key);
         if (at === -1) this.selected.push(key); else this.selected.splice(at, 1);
-        this.renderTable();
-        this.updateSelectBar();
+        this.renderTable(); this.updateSelectBar();
     },
-
     updateSelectBar() {
-        const bar = document.getElementById('bulkBar');
-        if (!bar) return;
-
-        bar.classList.toggle('open', this.selectMode);
-        if (!this.selectMode) return;
-
-        const n = this.selected.length;
-        document.getElementById('bulkCount').textContent = n + ' selected';
-
+        const bar = document.getElementById('bulkBar'); if (!bar) return; bar.classList.toggle('open', this.selectMode); if (!this.selectMode) return;
+        const n = this.selected.length; document.getElementById('bulkCount').textContent = n + ' selected';
         const tab = this.currentTab;
-        const show = (elId, on) => {
-            const el = document.getElementById(elId);
-            if (el) el.style.display = (on && n > 0) ? '' : 'none';
-        };
-        show('bulkDone', tab === 'Register');
-        show('bulkReopen', tab === 'Completed');
-        show('bulkBin', tab === 'Register' || tab === 'Completed');
-        show('bulkRestore', tab === 'Bin');
+        const show = (elId, on) => { const el = document.getElementById(elId); if (el) el.style.display = (on && n > 0) ? '' : 'none'; };
+        show('bulkDone', tab === 'Register'); show('bulkReopen', tab === 'Completed');
+        show('bulkBin', tab === 'Register' || tab === 'Completed'); show('bulkRestore', tab === 'Bin');
     },
-
     bulkAction(kind) {
         const ids = this.selected.slice();
         if (!ids.length) { this.showToast('Nothing selected.', 'info'); return; }
-
-        const todayStr = this.getLocalDateStr(new Date());
-        const pending = this.lists.statuses.indexOf('Pending') !== -1 ? 'Pending' : (this.lists.statuses[0] || 'Pending');
-        const spawned = [];
-        let n = 0;
-
+        const todayStr = this.getLocalDateStr(new Date()); const pending = this.lists.statuses.indexOf('Pending') !== -1 ? 'Pending' : (this.lists.statuses[0] || 'Pending');
+        const spawned = []; let n = 0;
         ids.forEach(id => {
-            const t = this.findTask(id);
-            if (!t) return;
-
+            const t = this.findTask(id); if (!t) return;
             if (kind === 'done') {
-                t.status = 'Completed';
-                t.completedDate = todayStr;
-                t.lastAckDate = null; t.snoozeUntil = null;
-                t.updatedAt = Date.now();
-                const repeat = this.nextOccurrence(t);
-                if (repeat) { if (!t.seriesId) t.seriesId = repeat.seriesId; spawned.push(repeat); }
+                t.status = 'Completed'; t.completedDate = todayStr; t.lastAckDate = null; t.snoozeUntil = null; t.updatedAt = Date.now();
+                const repeat = this.nextOccurrence(t); if (repeat) { if (!t.seriesId) t.seriesId = repeat.seriesId; spawned.push(repeat); }
             } else if (kind === 'reopen') {
-                t.status = pending;
-                t.completedDate = null; t.lastAckDate = null; t.snoozeUntil = null;
-                t.updatedAt = Date.now();
-            } else if (kind === 'bin') {
-                t.deleted = true;
-                t.dateDeleted = todayStr;
-                t.updatedAt = Date.now();
-            } else if (kind === 'restore') {
-                t.deleted = false;
-                t.dateDeleted = null;
-                t.updatedAt = Date.now();
-            } else {
-                return;
-            }
-            n++;
+                t.status = pending; t.completedDate = null; t.lastAckDate = null; t.snoozeUntil = null; t.updatedAt = Date.now();
+            } else if (kind === 'bin') { t.deleted = true; t.dateDeleted = todayStr; t.updatedAt = Date.now();
+            } else if (kind === 'restore') { t.deleted = false; t.dateDeleted = null; t.updatedAt = Date.now();
+            } else { return; } n++;
         });
-
-        spawned.forEach(s => this.tasks.push(s));
-        this.exitSelectMode();
-
-        this.saveData();
-        this.renderTable();
-        this.processEngine();
-
+        spawned.forEach(s => this.tasks.push(s)); this.exitSelectMode(); this.saveData(); this.renderTable(); this.processEngine();
         const verb = { done: 'completed', reopen: 'reopened', bin: 'moved to the Bin', restore: 'restored' }[kind];
-        this.showToast(n + ' ' + (n === 1 ? 'entry' : 'entries') + ' ' + verb + '.', 'success');
-        this.syncToGoogleSheets();
+        this.showToast(n + ' ' + (n === 1 ? 'entry' : 'entries') + ' ' + verb + '.', 'success'); this.syncToGoogleSheets();
     },
 
     /* ---------- BACKUP ---------- */
@@ -3275,156 +2874,84 @@ const app = {
             'dueDate', 'dueTime', 'mailChain', 'notes', 'recurrence', 'deleted', 'dateDeleted',
             'lastAckDate', 'snoozeUntil', 'completedDate', 'emailId', 'updatedAt', 'purged', 'seriesId'];
         const rows = [headers.join(',')];
-
         this.tasks.forEach(t => {
             rows.push(headers.map(h => `"${(t[h] !== undefined && t[h] !== null ? t[h] : '').toString().replace(/"/g, '""')}"`).join(','));
         });
-
         const blob = new Blob([rows.join('\n')], { type: 'text/csv;charset=utf-8;' });
-        const link = document.createElement('a');
-        link.href = URL.createObjectURL(blob);
+        const link = document.createElement('a'); link.href = URL.createObjectURL(blob);
         link.download = `banking_tasks_backup_${this.getLocalDateStr(new Date())}.csv`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+        document.body.appendChild(link); link.click(); document.body.removeChild(link);
         setTimeout(() => URL.revokeObjectURL(link.href), 2000);
-
         if (!silent) this.showToast('CSV backup exported', 'success');
     },
 
     importCSV(e) {
-        const file = e.target.files[0];
-        if (!file) return;
-
-        const reader = new FileReader();
+        const file = e.target.files[0]; if (!file) return; const reader = new FileReader();
         reader.onload = (evt) => {
             try {
                 let p = '', row = [''], ret = [row], i = 0, r = 0, s = !0, l;
                 for (l of evt.target.result) {
-                    if ('"' === l) { if (s && l === p) row[i] += l; s = !s; }
-                    else if (',' === l && s) l = row[++i] = '';
-                    else if ('\n' === l && s) { if ('\r' === p) row[i] = row[i].slice(0, -1); row = ret[++r] = [l = '']; i = 0; }
-                    else row[i] += l;
-                    p = l;
+                    if ('"' === l) { if (s && l === p) row[i] += l; s = !s; } else if (',' === l && s) l = row[++i] = '';
+                    else if ('\n' === l && s) { if ('\r' === p) row[i] = row[i].slice(0, -1); row = ret[++r] = [l = '']; i = 0; } else row[i] += l; p = l;
                 }
                 if (ret.length && ret[ret.length - 1].length === 1 && ret[ret.length - 1][0] === '') ret.pop();
                 if (ret.length < 2) { this.showToast("CSV file is empty or invalid.", "error"); return; }
-
-                const headers = ret[0];
-                const importedTasks = [];
-
+                const headers = ret[0]; const importedTasks = [];
                 for (let j = 1; j < ret.length; j++) {
-                    const vals = ret[j];
-                    const task = {};
+                    const vals = ret[j]; const task = {};
                     headers.forEach((h, idx) => {
                         let val = vals[idx] !== undefined ? vals[idx] : "";
-                        if (h === "deleted" || h === "purged") val = (val === "true");
-                        task[h] = val;
+                        if (h === "deleted" || h === "purged") val = (val === "true"); task[h] = val;
                     });
-                    if (!task.id) task.id = this.newId();
-                    if (task.deleted === undefined) task.deleted = false;
-                    if (task.purged === undefined) task.purged = false;
-                    if (!task.recurrence) task.recurrence = 'None';
-                    task.updatedAt = Number(task.updatedAt) || Date.now();
-                    delete task.overdueAlerted; delete task.overdueAcknowledged;
-                    delete task.alerted; delete task.reminderSent;
+                    if (!task.id) task.id = this.newId(); if (task.deleted === undefined) task.deleted = false; if (task.purged === undefined) task.purged = false;
+                    if (!task.recurrence) task.recurrence = 'None'; task.updatedAt = Number(task.updatedAt) || Date.now();
+                    delete task.overdueAlerted; delete task.overdueAcknowledged; delete task.alerted; delete task.reminderSent;
                     importedTasks.push(task);
                 }
-
                 this.exportData('csv', true);
-
-                const merge = confirm(
-                    `Importing ${importedTasks.length} entries.\n\n` +
-                    `A backup of your current data has just been downloaded.\n\n` +
-                    `OK = MERGE with what you already have (recommended)\n` +
-                    `Cancel = REPLACE everything`
-                );
-
+                const merge = confirm(`Importing ${importedTasks.length} entries.\n\nA backup of your current data has just been downloaded.\n\nOK = MERGE with what you already have (recommended)\nCancel = REPLACE everything`);
                 if (merge) {
-                    const res = this.mergeTasks(importedTasks);
-                    this.showToast(`Merged: ${res.added} new, ${res.updated} updated`, 'success');
+                    const res = this.mergeTasks(importedTasks); this.showToast(`Merged: ${res.added} new, ${res.updated} updated`, 'success');
                 } else {
-                    if (!confirm("REPLACE all current entries with the imported file? This cannot be undone.")) {
-                        this.showToast('Import cancelled', 'info');
-                        return;
-                    }
-                    this.tasks = importedTasks;
-                    this.userClearedAll = true;
-                    this.showToast('CSV backup restored (replaced)', 'success');
+                    if (!confirm("REPLACE all current entries with the imported file? This cannot be undone.")) { this.showToast('Import cancelled', 'info'); return; }
+                    this.tasks = importedTasks; this.userClearedAll = true; this.showToast('CSV backup restored (replaced)', 'success');
                 }
-
-                this.saveData();
-                this.renderTable();
-            } catch (err) {
-                console.error(err);
-                this.showToast('Error parsing CSV file', 'error');
-            }
+                this.saveData(); this.renderTable();
+            } catch (err) { console.error(err); this.showToast('Error parsing CSV file', 'error'); }
         };
-        reader.readAsText(file);
-        e.target.value = '';
+        reader.readAsText(file); e.target.value = '';
     },
 
     printRegister() { window.print(); },
 
     showToast(msg, type = 'info', action = null) {
-        const container = document.getElementById('toastContainer');
-        if (!container) return;
-
-        const toast = document.createElement('div');
-        toast.className = `toast ${type}`;
-
-        const label = document.createElement('span');
-        label.textContent = msg;
-        toast.appendChild(label);
-
+        const container = document.getElementById('toastContainer'); if (!container) return;
+        const toast = document.createElement('div'); toast.className = `toast ${type}`;
+        const label = document.createElement('span'); label.textContent = msg; toast.appendChild(label);
         let life = 3000;
         if (action && action.label && typeof action.onClick === 'function') {
-            life = 6500;
-            const btn = document.createElement('button');
-            btn.type = 'button';
-            btn.className = 'toast-action';
-            btn.textContent = action.label;
-            btn.addEventListener('click', () => { toast.remove(); action.onClick(); });
-            toast.appendChild(btn);
+            life = 6500; const btn = document.createElement('button'); btn.type = 'button'; btn.className = 'toast-action';
+            btn.textContent = action.label; btn.addEventListener('click', () => { toast.remove(); action.onClick(); }); toast.appendChild(btn);
         }
-
         container.appendChild(toast);
-        setTimeout(() => {
-            if (!toast.isConnected) return;
-            toast.style.transform = 'translateY(-14px)';
-            toast.style.opacity = '0';
-            setTimeout(() => toast.remove(), 350);
-        }, life);
+        setTimeout(() => { if (!toast.isConnected) return; toast.style.transform = 'translateY(-14px)'; toast.style.opacity = '0'; setTimeout(() => toast.remove(), 350); }, life);
     }
 };
 
 document.addEventListener('DOMContentLoaded', () => app.checkAuthOnStart());
 
-/* Keep --toolbar-h in sync with whichever sticky toolbar is on screen, so the
-   sticky table header parks just under it instead of sliding behind it. */
 document.addEventListener('DOMContentLoaded', () => {
-    const bars = document.querySelectorAll('.toolbar-row');
-    if (!bars.length) return;
-    const sync = () => {
-        let h = 0;
-        bars.forEach((b) => { if (b.offsetParent !== null) h = Math.max(h, b.offsetHeight); });
-        document.documentElement.style.setProperty('--toolbar-h', h + 'px');
-    };
-    if (window.ResizeObserver) {
-        const ro = new ResizeObserver(sync);
-        bars.forEach((b) => ro.observe(b));
-    }
-    window.addEventListener('resize', sync);
-    sync();
+    const bars = document.querySelectorAll('.toolbar-row'); if (!bars.length) return;
+    const sync = () => { let h = 0; bars.forEach((b) => { if (b.offsetParent !== null) h = Math.max(h, b.offsetHeight); }); document.documentElement.style.setProperty('--toolbar-h', h + 'px'); };
+    if (window.ResizeObserver) { const ro = new ResizeObserver(sync); bars.forEach((b) => ro.observe(b)); }
+    window.addEventListener('resize', sync); sync();
 });
 
-/* ---------------- PWA glue ---------------- */
 window.app = app;
 
 const pwa = {
     deferred: null,
     waitingWorker: null,
-
     init() {
         const standalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
         const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
@@ -3432,51 +2959,31 @@ const pwa = {
 
         if (standalone) {
             if (hint) hint.textContent = 'Running as an installed app. Entries stay on this device and sync to your sheet.';
-        } else if (isIOS && hint) {
-            hint.innerHTML = 'On iPhone or iPad: tap <b>Share</b>, then <b>Add to Home Screen</b>.';
-        }
+        } else if (isIOS && hint) { hint.innerHTML = 'On iPhone or iPad: tap <b>Share</b>, then <b>Add to Home Screen</b>.'; }
 
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => this.registerWorker());
-
-            // A new worker taking over means new files are live: reload once so
-            // the running page and the cache are the same version. The very
-            // first install claims an uncontrolled page — nothing to reload.
             this.hadController = !!navigator.serviceWorker.controller;
             navigator.serviceWorker.addEventListener('controllerchange', () => {
-                if (this.reloading || !this.hadController) return;
-                this.reloading = true;
-                window.location.reload();
+                if (this.reloading || !this.hadController) return; this.reloading = true; window.location.reload();
             });
-
             navigator.serviceWorker.addEventListener('message', (event) => {
                 const data = event.data || {};
-                if (data.type === 'SW_ACTIVATED' || data.type === 'VERSION') {
-                    this.version = data.version || this.version;
-                    this.renderVersion();
-                }
+                if (data.type === 'SW_ACTIVATED' || data.type === 'VERSION') { this.version = data.version || this.version; this.renderVersion(); }
             });
-        } else {
-            this.renderVersion();
-        }
+        } else { this.renderVersion(); }
 
         window.addEventListener('beforeinstallprompt', (e) => {
-            e.preventDefault();
-            this.deferred = e;
-            const btn = document.getElementById('installBtn');
-            if (btn) btn.style.display = 'flex';
+            e.preventDefault(); this.deferred = e; const btn = document.getElementById('installBtn'); if (btn) btn.style.display = 'flex';
         });
 
         window.addEventListener('appinstalled', () => {
-            this.deferred = null;
-            const btn = document.getElementById('installBtn');
-            if (btn) btn.style.display = 'none';
+            this.deferred = null; const btn = document.getElementById('installBtn'); if (btn) btn.style.display = 'none';
             if (typeof app !== 'undefined' && app.showToast) app.showToast('Installed. Open it from your home screen.', 'success');
         });
 
         const params = new URLSearchParams(location.search);
-        const tab = params.get('tab');
-        const action = params.get('action');
+        const tab = params.get('tab'); const action = params.get('action');
         if (tab || action) {
             setTimeout(() => {
                 if (!window.app || !app.currentUser) return;
@@ -3485,91 +2992,47 @@ const pwa = {
             }, 400);
         }
     },
-
     async install() {
-        if (!this.deferred) {
-            app.showToast('Use your browser menu: Add to home screen', 'info');
-            return;
-        }
-        this.deferred.prompt();
-        const choice = await this.deferred.userChoice;
-        this.deferred = null;
+        if (!this.deferred) { app.showToast('Use your browser menu: Add to home screen', 'info'); return; }
+        this.deferred.prompt(); const choice = await this.deferred.userChoice; this.deferred = null;
         if (choice.outcome !== 'accepted') app.showToast('Install cancelled', 'info');
     },
-
-    reg: null,
-    hadController: false,
-    waitingWorker: null,
-    reloading: false,
-    version: null,
-
+    reg: null, hadController: false, waitingWorker: null, reloading: false, version: null,
     async registerWorker() {
         try {
-            const reg = await navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' });
-            this.reg = reg;
-
+            const reg = await navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' }); this.reg = reg;
             if (reg.waiting && navigator.serviceWorker.controller) this.onUpdateReady(reg.waiting);
-
             reg.addEventListener('updatefound', () => {
-                const sw = reg.installing;
-                if (!sw) return;
-                sw.addEventListener('statechange', () => {
-                    if (sw.state === 'installed' && navigator.serviceWorker.controller) this.onUpdateReady(sw);
-                });
+                const sw = reg.installing; if (!sw) return;
+                sw.addEventListener('statechange', () => { if (sw.state === 'installed' && navigator.serviceWorker.controller) this.onUpdateReady(sw); });
             });
-
-            // Look for a new deploy on a slow loop, when the app comes back to
-            // the foreground, and when the connection returns.
             setInterval(() => this.silentUpdateCheck(), 30 * 60 * 1000);
-            document.addEventListener('visibilitychange', () => {
-                if (document.visibilityState === 'visible') this.silentUpdateCheck();
-            });
+            document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') this.silentUpdateCheck(); });
             window.addEventListener('online', () => this.silentUpdateCheck());
-
             this.askVersion();
-        } catch (err) {
-            console.warn('Service worker registration failed', err);
-            this.renderVersion();
-        }
+        } catch (err) { console.warn('Service worker registration failed', err); this.renderVersion(); }
     },
-
     onUpdateReady(worker) {
-        if (!worker || this.waitingWorker === worker) return;  // one prompt per build
-        this.waitingWorker = worker;
-        this.renderVersion();
-        if (typeof app !== 'undefined' && app.showToast) {
-            app.showToast('A new version is ready.', 'info', { label: 'Update now', onClick: () => this.applyUpdate() });
-        }
+        if (!worker || this.waitingWorker === worker) return; this.waitingWorker = worker; this.renderVersion();
+        if (typeof app !== 'undefined' && app.showToast) { app.showToast('A new version is ready.', 'info', { label: 'Update now', onClick: () => this.applyUpdate() }); }
     },
-
     applyUpdate() {
         const worker = this.waitingWorker || (this.reg && this.reg.waiting);
         if (!worker) { window.location.reload(); return; }
         if (typeof app !== 'undefined' && app.showToast) app.showToast('Updating…', 'info');
         worker.postMessage({ type: 'SKIP_WAITING' });
-        // If the worker does not hand over within a few seconds, reload anyway.
         setTimeout(() => { if (!this.reloading) { this.reloading = true; window.location.reload(); } }, 4000);
     },
-
-    silentUpdateCheck() {
-        if (!this.reg || !navigator.onLine) return;
-        this.reg.update().catch(() => {});
-    },
-
+    silentUpdateCheck() { if (!this.reg || !navigator.onLine) return; this.reg.update().catch(() => {}); },
     askVersion() {
         const sw = navigator.serviceWorker.controller;
         if (!sw || !window.MessageChannel) { this.renderVersion(); return; }
         const channel = new MessageChannel();
-        channel.port1.onmessage = (event) => {
-            const data = event.data || {};
-            if (data.version) { this.version = data.version; this.renderVersion(); }
-        };
+        channel.port1.onmessage = (event) => { const data = event.data || {}; if (data.version) { this.version = data.version; this.renderVersion(); } };
         try { sw.postMessage({ type: 'GET_VERSION' }, [channel.port2]); } catch (e) { this.renderVersion(); }
     },
-
     renderVersion() {
-        const el = document.getElementById('swVersion');
-        if (!el) return;
+        const el = document.getElementById('swVersion'); if (!el) return;
         if (!('serviceWorker' in navigator)) { el.textContent = 'Offline cache needs a hosted copy over HTTPS.'; return; }
         const bits = [];
         bits.push(this.version ? 'Cache ' + this.version : 'Cache starting up');
@@ -3577,43 +3040,30 @@ const pwa = {
         if (this.waitingWorker) bits.push('update waiting');
         el.textContent = bits.join(' · ') + '.';
     },
-
     async checkUpdate() {
         if (!('serviceWorker' in navigator)) { app.showToast('Updates need a hosted copy over HTTPS', 'warning'); return; }
         if (this.waitingWorker) { this.applyUpdate(); return; }
-
         const reg = this.reg || await navigator.serviceWorker.getRegistration();
         if (!reg) { app.showToast('Not installed yet', 'info'); return; }
         this.reg = reg;
-
         app.showToast('Checking for an update…', 'info');
         try {
-            await reg.update();
-            await new Promise(r => setTimeout(r, 1200));
+            await reg.update(); await new Promise(r => setTimeout(r, 1200));
             if (this.waitingWorker || reg.waiting) { this.onUpdateReady(this.waitingWorker || reg.waiting); return; }
-            this.askVersion();
-            app.showToast('You are on the latest version' + (this.version ? ' (' + this.version + ')' : ''), 'success');
-        } catch (e) {
-            app.showToast('Could not reach the server', 'error');
-        }
+            this.askVersion(); app.showToast('You are on the latest version' + (this.version ? ' (' + this.version + ')' : ''), 'success');
+        } catch (e) { app.showToast('Could not reach the server', 'error'); }
     },
-
-    // Last resort when a phone is stuck on an old build: wipe every cache and
-    // re-fetch from the server. Tasks live in local storage and are untouched.
     clearCache() {
         if (!confirm('Clear the offline cache and reload?\n\nYour entries stay on this device.')) return;
         const done = () => window.location.reload(true);
         const sw = navigator.serviceWorker && navigator.serviceWorker.controller;
         if (sw && window.MessageChannel) {
-            const channel = new MessageChannel();
-            channel.port1.onmessage = done;
+            const channel = new MessageChannel(); channel.port1.onmessage = done;
             try { sw.postMessage({ type: 'CLEAR_CACHES' }, [channel.port2]); } catch (e) { done(); }
             setTimeout(done, 3000);
         } else if (window.caches) {
             caches.keys().then(keys => Promise.all(keys.map(k => caches.delete(k)))).then(done).catch(done);
-        } else {
-            done();
-        }
+        } else { done(); }
     }
 };
-pwa.init();
+pwa.init();
