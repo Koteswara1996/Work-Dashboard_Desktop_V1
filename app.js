@@ -272,9 +272,10 @@ const app = {
         if (this.tasks.length === 0) this.pullTasksFromCloud(false);
 
         this.engineInterval = setInterval(() => { this.processEngine(); }, 5000);
-        setInterval(() => { this.updateHeader(); this.renderNudgeSettings(); }, 60000);
+        setInterval(() => { this.updateHeader(); this.renderNudgeSettings(); this.checkHolidayAlerts(new Date()); }, 60000);
         setInterval(() => { this.syncCycle(); }, this.SYNC_EVERY_MS);
         setTimeout(() => this.syncCycle(), 2500);
+        setTimeout(() => this.checkHolidayAlerts(new Date()), 3000);
 
         const unlock = () => this.initAudio();
         document.addEventListener('click', unlock, { passive: true });
@@ -929,7 +930,6 @@ const app = {
         }
 
         this.checkNudges(now);
-        this.checkHolidayAlerts(now);
     },
 
     triggerPersistentAlarm(tasks) {
@@ -1502,9 +1502,12 @@ const app = {
     },
 
     holidayDateChanged() {
+        // Always recompute the suggestion when the date changes — otherwise
+        // editing an existing holiday's date leaves the old "next working
+        // day" behind since the field is no longer empty.
         const dateVal = document.getElementById('holidayDate').value;
         const nextField = document.getElementById('holidayNextWorking');
-        if (nextField && !nextField.value && dateVal) nextField.value = this.computeNextWorkingDay(dateVal);
+        if (nextField && dateVal) nextField.value = this.computeNextWorkingDay(dateVal);
     },
 
     saveHoliday(e) {
@@ -2096,12 +2099,23 @@ const app = {
         // that lands while the Task modal is open silently resets every
         // dropdown in it back to its first option. Remember and reapply the
         // selection — same fix already used for the "Pending With" filter.
+        //
+        // A value can be showing here that isn't in this.lists at all: when
+        // editing a task whose stored category/priority/status/pendingWith
+        // was since removed from Settings → Lists, openTaskModal's
+        // setSelectValue() adds it as a one-off <option> so the task's real
+        // data isn't silently altered. If that value isn't re-added after a
+        // rebuild, it's just as reset as if we'd never preserved anything —
+        // so add it back as a one-off option too, not just when it's a
+        // current, still-valid list entry.
         const keepSelect = (elId, html) => {
             const el = document.getElementById(elId);
             if (!el) return;
             const previous = el.value;
             el.innerHTML = html;
-            if (previous && Array.from(el.options).some(o => o.value === previous)) el.value = previous;
+            if (!previous) return;
+            if (!Array.from(el.options).some(o => o.value === previous)) el.add(new Option(previous, previous));
+            el.value = previous;
         };
 
         keepSelect('taskCategory', '<option value="">Select Category</option>' + this.lists.categories.map(opt).join(''));
@@ -2340,7 +2354,15 @@ const app = {
             return matchSearch && matchType;
         });
 
-        filtered.sort((a, b) => a.date.localeCompare(b.date));
+        // Upcoming holidays on top (soonest first), so the ones that matter
+        // right now don't get buried under a year's worth of ones that have
+        // already passed. Past holidays follow, most recently passed first.
+        const todayStr = this.getLocalDateStr(new Date());
+        filtered.sort((a, b) => {
+            const aUp = a.date >= todayStr, bUp = b.date >= todayStr;
+            if (aUp !== bUp) return aUp ? -1 : 1;
+            return aUp ? a.date.localeCompare(b.date) : b.date.localeCompare(a.date);
+        });
 
         this.renderHolidayBlocks();
 
@@ -2356,7 +2378,6 @@ const app = {
             return;
         }
 
-        const todayStr = this.getLocalDateStr(new Date());
         const rowFrag = document.createDocumentFragment();
         const cardFrag = document.createDocumentFragment();
 
