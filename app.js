@@ -2329,6 +2329,22 @@ const app = {
     },
 
     /* ---------- HOLIDAYS RENDERING ---------- */
+    // For the Holidays tab: shows the weekday name alongside the date, and
+    // flags Saturday/Sunday so continuous weekend+holiday runs are obvious
+    // at a glance without having to work it out from the date alone.
+    formatHolidayDate(dateStr) {
+        if (!dateStr) return '-';
+        const p = String(dateStr).split('-').map(Number);
+        if (p.length < 3 || !p[0] || !p[1] || !p[2]) return this.sanitize(String(dateStr));
+        const d = new Date(p[0], p[1] - 1, p[2]);
+        const dow = d.getDay();
+        const isWeekend = dow === 0 || dow === 6;
+        const text = d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+        return isWeekend
+            ? '<span style="color:var(--red-ink); font-weight:700;">' + this.sanitize(text) + '</span>'
+            : this.sanitize(text);
+    },
+
     holidayTypeColour(type) {
         const idx = Math.max(0, this.holidayCalendars().indexOf(type));
         return this.DASH_PALETTE[idx % this.DASH_PALETTE.length];
@@ -2392,9 +2408,9 @@ const app = {
             row.dataset.recordMode = 'holiday';
             row.style.opacity = isPast ? '0.6' : '1';
             row.innerHTML = `
-                <td style="font-family: var(--font-num); font-weight: 600; white-space:nowrap;">${this.formatDateStr(h.date)}</td>
+                <td style="font-family: var(--font-num); font-weight: 600; white-space:nowrap;">${this.formatHolidayDate(h.date)}</td>
                 <td style="font-weight: 700; color: var(--label);">${alertIco} ${this.sanitize(h.name)}</td>
-                <td style="font-family: var(--font-num); color: var(--label-2); white-space:nowrap;">${this.formatDateStr(h.nextWorkingDay)}</td>
+                <td style="font-family: var(--font-num); color: var(--label-2); white-space:nowrap;">${this.formatHolidayDate(h.nextWorkingDay)}</td>
                 <td><span style="display:inline-flex; align-items:center; padding:4px 10px; font-size:0.75rem; font-weight:700; border-radius:12px; color:${colour}; background:color-mix(in srgb, ${colour} 14%, transparent); border:1px solid color-mix(in srgb, ${colour} 30%, transparent)">${this.sanitize(h.type)}</span></td>
                 <td class="action-cell">
                     <button type="button" class="btn-icon" data-action="holiday-edit" data-id="${idAttr}" title="Edit Holiday">${this.SVGS.edit}</button>
@@ -2415,8 +2431,8 @@ const app = {
                 </div>
                 <div class="tcard-body">
                     <div class="tcard-chips">
-                        <span class="chip">${this.formatDateStr(h.date)}</span>
-                        <span class="chip">Next working: ${this.formatDateStr(h.nextWorkingDay)}</span>
+                        <span class="chip">${this.formatHolidayDate(h.date)}</span>
+                        <span class="chip">Next working: ${this.formatHolidayDate(h.nextWorkingDay)}</span>
                     </div>
                     <div class="tcard-foot">
                         <div class="tcard-actions">
@@ -3138,6 +3154,7 @@ const app = {
         const monthName = new Date().toLocaleDateString('en-IN', { month: 'long' });
         const noDue = open.filter(t => !t.dueDate);
         const pendingNow = open.filter(t => (t.status || 'Pending') === 'Pending');
+        const pendingToday = open.filter(t => (t.status || 'Pending') === 'Pending' && this.isDateInRange(t, 'Today'));
 
         const todayStr = this.getLocalDateStr(new Date());
         const in7 = new Date(); in7.setDate(in7.getDate() + 7);
@@ -3200,6 +3217,11 @@ const app = {
                 title: 'Pending', count: pendingNow.length, colour: 'var(--amber)',
                 ftype: 'status', fvalue: 'Pending',
                 sub: 'As of now'
+            }),
+            this.dashTile({
+                title: 'Pending Today', count: pendingToday.length, colour: 'var(--red)',
+                ftype: 'pendingToday', fvalue: 'Today',
+                sub: pendingToday.length ? 'Still pending, due today' : 'Nothing pending today'
             })
         ].join('');
 
@@ -3255,6 +3277,9 @@ const app = {
 
         if (ftype === 'due') {
             document.getElementById('filterDue').value = fvalue;
+        } else if (ftype === 'pendingToday') {
+            document.getElementById('filterDue').value = 'Today';
+            this.setMultiValue('filterStatusOpts', 'Pending');
         } else if (ftype === 'category') {
             this.setMultiValue('filterCategoryOpts', fvalue);
         } else if (ftype === 'status') {
@@ -3275,7 +3300,7 @@ const app = {
 
         this.switchTab('Register');
 
-        const labels = { due: 'Due', category: 'Category', status: 'Status', priority: 'Priority', pending: 'Pending with' };
+        const labels = { due: 'Due', pendingToday: 'Pending today', category: 'Category', status: 'Status', priority: 'Priority', pending: 'Pending with' };
         const pretty = { Today: 'Due today', Overdue: 'Overdue', Next7Days: 'Next 7 days', ThisMonth: 'This month', NoDue: 'No due date' };
         this.showToast((labels[ftype] || ftype) + ': ' + (pretty[fvalue] || fvalue), 'info');
     },
