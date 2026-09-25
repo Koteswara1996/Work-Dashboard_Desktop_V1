@@ -397,6 +397,48 @@
         .search-compact { flex: 0 0 180px; min-width: 140px; height: 38px; }
         .toolbar-filters { display: flex; align-items: center; gap: 8px; flex: 1 1 auto; }
         .toolbar-actions { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; margin-left: auto; }
+
+        /* ── COMPACT TOOLBAR (search + gear, no dedicated filter row) ── */
+        .compact-toolbar {
+            display: flex; align-items: center; gap: 8px; flex-wrap: nowrap;
+            padding: 12px var(--gutter, 16px); position: relative;
+        }
+        .toolbar-search-wrap { position: relative; flex: 1 1 auto; min-width: 0; }
+        .toolbar-search-wrap .search-compact { width: 100%; flex: 1 1 auto; min-width: 0; padding-right: 34px; }
+        .search-cancel-btn {
+            display: none; position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+            width: 24px; height: 24px; border-radius: 50%; border: none; background: var(--separator);
+            color: var(--label-2); font-size: 0.72rem; line-height: 1; cursor: pointer; align-items: center; justify-content: center;
+        }
+        .gear-btn { position: relative; flex: 0 0 auto; }
+        .gear-dot {
+            position: absolute; top: 3px; right: 3px; width: 8px; height: 8px; border-radius: 50%;
+            background: var(--red); border: 2px solid var(--glass-header-bg); display: none;
+        }
+        .filter-panel {
+            display: none; position: absolute; top: calc(100% + 6px); right: var(--gutter, 16px); z-index: 60;
+            width: min(320px, calc(100vw - 32px)); max-height: min(70vh, 520px); overflow-y: auto;
+            background: var(--card-bg); border: 1px solid var(--line); border-radius: 16px;
+            box-shadow: 0 12px 36px rgba(0,0,0,0.22); padding: 14px; flex-direction: column; gap: 12px;
+        }
+        .filter-panel.open { display: flex; }
+        .filter-panel-group label {
+            display: block; font-size: 0.68rem; font-weight: 700; text-transform: uppercase;
+            letter-spacing: 0.05em; color: var(--label-2); margin-bottom: 6px;
+        }
+        .filter-panel-group .multi-select, .filter-panel-group .filter-select { width: 100%; }
+        .filter-panel-divider { height: 1px; background: var(--separator); margin: 2px 0; }
+        .filter-panel-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+        .fp-action-btn {
+            display: inline-flex; align-items: center; gap: 6px; padding: 8px 10px; border-radius: 10px;
+            background: var(--input-bg); border: 1px solid var(--line); font-size: 0.8rem; font-weight: 600;
+            color: var(--label); cursor: pointer; flex: 1 1 auto; justify-content: center; white-space: nowrap;
+        }
+        .fp-action-btn.danger { color: var(--red-ink); }
+        /* search-expanded: hide everything except the search bar itself */
+        .compact-toolbar.search-expanded > *:not(.toolbar-search-wrap) { display: none !important; }
+        .compact-toolbar.search-expanded .toolbar-search-wrap { flex: 1 1 100%; }
+        .compact-toolbar.search-expanded .search-cancel-btn { display: flex; }
         
         .filter-input, .filter-select, .ms-header {
             display: flex; align-items: center; height: 38px; padding: 0 12px;
@@ -1265,36 +1307,57 @@
 
     <!-- TASKS TAB -->
     <div class="content-area" id="registerTab">
-        <div class="toolbar-row single-line-toolbar" id="registerToolbar">
-            <input autocomplete="off" type="text" class="filter-input search-compact" id="searchInput" placeholder="Search tasks..." oninput="app.debouncedRender()">
-            
-            <div class="toolbar-filters">
-                <div class="multi-select" id="ms-category"><div class="ms-header" onclick="app.toggleDropdown('ms-category')">Categories</div><div class="ms-options" id="filterCategoryOpts"></div></div>
-                <div class="multi-select" id="ms-priority"><div class="ms-header" onclick="app.toggleDropdown('ms-priority')">Priorities</div><div class="ms-options" id="filterPriorityOpts"></div></div>
-                <div class="multi-select" id="ms-status"><div class="ms-header" onclick="app.toggleDropdown('ms-status')">Statuses</div><div class="ms-options" id="filterStatusOpts"></div></div>
-                <select class="filter-select" id="filterPending" onchange="app.renderTable()"><option value="All">All People</option></select>
-                <select class="filter-select" id="filterDue" onchange="app.renderTable()">
-                    <option value="All">Any Due Date</option>
-                    <option value="Overdue">Overdue</option>
-                    <option value="Today">Today</option>
-                    <option value="Tomorrow">Tomorrow</option>
-                    <option value="Next7Days">Next 7 days</option>
-                    <option value="ThisWeek">This week</option>
-                    <option value="NextWeek">Next week</option>
-                    <option value="ThisMonth">This month</option>
-                    <option value="NoDue">No due date</option>
-                </select>
+        <div class="toolbar-row compact-toolbar" id="registerToolbar">
+            <div class="toolbar-search-wrap">
+                <input autocomplete="off" type="text" class="filter-input search-compact" id="searchInput" placeholder="Search tasks..." oninput="app.debouncedRender()" onfocus="app.expandSearch('register')">
+                <button type="button" class="search-cancel-btn" onclick="app.collapseSearch('register')" title="Close search">✕</button>
             </div>
 
-            <div class="toolbar-actions">
-                <button class="btn-icon select-toggle" onclick="app.toggleSelectMode()" title="Select several entries">☑</button>
-                <button class="btn-icon view-toggle" onclick="app.toggleViewMode()" title="Switch between table and cards">▦</button>
-                <button class="btn-icon" onclick="app.clearFilters()" title="Clear Filters">🚫</button>
-                <button class="btn-icon" id="sortToggleRegister" onclick="app.openSortMenu('Register', this)" title="Sort">🔃</button>
-                <button class="btn-icon" onclick="app.fitColumns('register')" title="Fit Columns">⤢</button>
-                <button class="btn-icon" onclick="app.printRegister()" title="Print">🖨️</button>
-                <button class="btn-icon" onclick="app.openEmailModal()" title="Mail">📧</button>
-                <button class="btn-new-entry" onclick="app.openTaskModal()" title="New Entry">＋</button>
+            <button type="button" class="btn-icon gear-btn" id="registerGearBtn" onclick="app.toggleFilterPanel('register')" title="Filters &amp; more">⚙️<span class="gear-dot" id="registerFilterDot"></span></button>
+            <button class="btn-icon view-toggle" onclick="app.toggleViewMode()" title="Switch between table and cards">▦</button>
+            <button class="btn-new-entry" onclick="app.openTaskModal()" title="New Entry">＋</button>
+
+            <div class="filter-panel" id="registerFilterPanel">
+                <div class="filter-panel-group">
+                    <label>Category</label>
+                    <div class="multi-select" id="ms-category"><div class="ms-header" onclick="app.toggleDropdown('ms-category')">Categories</div><div class="ms-options" id="filterCategoryOpts"></div></div>
+                </div>
+                <div class="filter-panel-group">
+                    <label>Priority</label>
+                    <div class="multi-select" id="ms-priority"><div class="ms-header" onclick="app.toggleDropdown('ms-priority')">Priorities</div><div class="ms-options" id="filterPriorityOpts"></div></div>
+                </div>
+                <div class="filter-panel-group">
+                    <label>Status</label>
+                    <div class="multi-select" id="ms-status"><div class="ms-header" onclick="app.toggleDropdown('ms-status')">Statuses</div><div class="ms-options" id="filterStatusOpts"></div></div>
+                </div>
+                <div class="filter-panel-group">
+                    <label>Pending With</label>
+                    <select class="filter-select" id="filterPending" onchange="app.renderTable(); app.markFilterDot('register');"><option value="All">All People</option></select>
+                </div>
+                <div class="filter-panel-group">
+                    <label>Due Date</label>
+                    <select class="filter-select" id="filterDue" onchange="app.renderTable(); app.markFilterDot('register');">
+                        <option value="All">Any Due Date</option>
+                        <option value="Overdue">Overdue</option>
+                        <option value="Today">Today</option>
+                        <option value="DueByToday">Due by Today (incl. overdue)</option>
+                        <option value="Tomorrow">Tomorrow</option>
+                        <option value="Next7Days">Next 7 days</option>
+                        <option value="ThisWeek">This week</option>
+                        <option value="NextWeek">Next week</option>
+                        <option value="ThisMonth">This month</option>
+                        <option value="NoDue">No due date</option>
+                    </select>
+                </div>
+                <div class="filter-panel-divider"></div>
+                <div class="filter-panel-actions">
+                    <button type="button" class="fp-action-btn" onclick="app.toggleSelectMode()">☑ Select</button>
+                    <button type="button" class="fp-action-btn" id="sortToggleRegister" onclick="app.openSortMenu('Register', this)">🔃 Sort</button>
+                    <button type="button" class="fp-action-btn" onclick="app.fitColumns('register')">⤢ Fit Columns</button>
+                    <button type="button" class="fp-action-btn" onclick="app.printRegister()">🖨️ Print</button>
+                    <button type="button" class="fp-action-btn" onclick="app.openEmailModal()">📧 Mail</button>
+                </div>
+                <button type="button" class="fp-action-btn danger" onclick="app.clearFilters()">🚫 Clear All Filters</button>
             </div>
         </div>
 
@@ -1329,18 +1392,32 @@
 
     <!-- HOLIDAYS TAB -->
     <div class="content-area" id="holidaysTab">
-        <div class="toolbar-row single-line-toolbar" id="holidaysToolbar">
-            <input autocomplete="off" type="text" class="filter-input search-compact" id="searchHolidays" placeholder="Search holidays..." oninput="app.renderHolidays()">
-            <div class="toolbar-filters">
-                <select class="filter-select" id="filterHolidayType" onchange="app.renderHolidays()">
-                    <option value="All">All Holiday Calendars</option>
-                    <option value="USD Holiday">USD Holiday</option>
-                    <option value="Indian Bank Holiday">Indian Bank Holiday</option>
-                </select>
+        <div class="toolbar-row compact-toolbar" id="holidaysToolbar">
+            <div class="toolbar-search-wrap">
+                <input autocomplete="off" type="text" class="filter-input search-compact" id="searchHolidays" placeholder="Search holidays..." oninput="app.renderHolidays()" onfocus="app.expandSearch('holidays')">
+                <button type="button" class="search-cancel-btn" onclick="app.collapseSearch('holidays')" title="Close search">✕</button>
             </div>
-            <div class="toolbar-actions">
-                <button class="btn-icon view-toggle" onclick="app.toggleViewMode()" title="Switch between table and cards">▦</button>
-                <button class="btn-new-entry" onclick="app.openHolidayModal()" title="Add Holiday">＋</button>
+
+            <button type="button" class="btn-icon gear-btn" id="holidaysGearBtn" onclick="app.toggleFilterPanel('holidays')" title="Filters &amp; more">⚙️<span class="gear-dot" id="holidaysFilterDot"></span></button>
+            <button class="btn-icon view-toggle" onclick="app.toggleViewMode()" title="Switch between table and cards">▦</button>
+            <button class="btn-new-entry" onclick="app.openHolidayModal()" title="Add Holiday">＋</button>
+
+            <div class="filter-panel" id="holidaysFilterPanel">
+                <div class="filter-panel-group">
+                    <label>Holiday Calendar</label>
+                    <select class="filter-select" id="filterHolidayType" onchange="app.renderHolidays(); app.markFilterDot('holidays');">
+                        <option value="All">All Holiday Calendars</option>
+                        <option value="USD Holiday">USD Holiday</option>
+                        <option value="Indian Bank Holiday">Indian Bank Holiday</option>
+                    </select>
+                </div>
+                <div class="filter-panel-group">
+                    <label style="display:flex; align-items:center; gap:8px; text-transform:none; letter-spacing:0; font-size:0.86rem; font-weight:600; color:var(--label);">
+                        <input type="checkbox" id="filterHolidayAlertOnly" style="width:16px; height:16px; accent-color:var(--accent);" onchange="app.renderHolidays(); app.markFilterDot('holidays');"> Alerts-on only
+                    </label>
+                </div>
+                <div class="filter-panel-divider"></div>
+                <button type="button" class="fp-action-btn danger" onclick="app.clearHolidayFilters()">🚫 Clear All Filters</button>
             </div>
         </div>
 
@@ -1370,21 +1447,30 @@
 
     <!-- COMPLETED TAB -->
     <div class="content-area" id="completedTab">
-        <div class="toolbar-row single-line-toolbar" id="completedToolbar">
-            <input autocomplete="off" type="text" class="filter-input search-compact" id="searchCompleted" placeholder="Search completed..." oninput="app.debouncedRender()">
-            
-            <div class="toolbar-filters">
-                <div class="multi-select" id="ms-category-completed">
-                    <div class="ms-header" onclick="app.toggleDropdown('ms-category-completed')">All Categories</div>
-                    <div class="ms-options" id="filterCategoryCompletedOpts"></div>
-                </div>
+        <div class="toolbar-row compact-toolbar" id="completedToolbar">
+            <div class="toolbar-search-wrap">
+                <input autocomplete="off" type="text" class="filter-input search-compact" id="searchCompleted" placeholder="Search completed..." oninput="app.debouncedRender()" onfocus="app.expandSearch('completed')">
+                <button type="button" class="search-cancel-btn" onclick="app.collapseSearch('completed')" title="Close search">✕</button>
             </div>
 
-            <div class="toolbar-actions">
-                <button class="btn-icon select-toggle" onclick="app.toggleSelectMode()" title="Select several entries">☑</button>
-                <button class="btn-icon view-toggle" onclick="app.toggleViewMode()" title="Switch between table and cards">▦</button>
-                <button class="btn-icon" id="sortToggleCompleted" onclick="app.openSortMenu('Completed', this)" title="Sort">🔃</button>
-                <button class="btn-icon" onclick="app.fitColumns('completed')" title="Fit Columns">⤢</button>
+            <button type="button" class="btn-icon gear-btn" id="completedGearBtn" onclick="app.toggleFilterPanel('completed')" title="Filters &amp; more">⚙️<span class="gear-dot" id="completedFilterDot"></span></button>
+            <button class="btn-icon view-toggle" onclick="app.toggleViewMode()" title="Switch between table and cards">▦</button>
+
+            <div class="filter-panel" id="completedFilterPanel">
+                <div class="filter-panel-group">
+                    <label>Category</label>
+                    <div class="multi-select" id="ms-category-completed">
+                        <div class="ms-header" onclick="app.toggleDropdown('ms-category-completed')">All Categories</div>
+                        <div class="ms-options" id="filterCategoryCompletedOpts"></div>
+                    </div>
+                </div>
+                <div class="filter-panel-divider"></div>
+                <div class="filter-panel-actions">
+                    <button type="button" class="fp-action-btn" onclick="app.toggleSelectMode()">☑ Select</button>
+                    <button type="button" class="fp-action-btn" id="sortToggleCompleted" onclick="app.openSortMenu('Completed', this)">🔃 Sort</button>
+                    <button type="button" class="fp-action-btn" onclick="app.fitColumns('completed')">⤢ Fit Columns</button>
+                </div>
+                <button type="button" class="fp-action-btn danger" onclick="app.clearFilters()">🚫 Clear All Filters</button>
             </div>
         </div>
 

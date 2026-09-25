@@ -1796,6 +1796,75 @@ const app = {
         if (sortPanel) sortPanel.classList.remove('open');
     },
 
+    /* ---------- COMPACT TOOLBAR: gear filter panel + expandable search ---------- */
+    toggleFilterPanel(key) {
+        const panel = document.getElementById(key + 'FilterPanel');
+        if (!panel) return;
+        const wasOpen = panel.classList.contains('open');
+        this.closeAllFilterPanels();
+        if (wasOpen) return;
+
+        panel.classList.add('open');
+        const onDoc = (e) => {
+            const gear = document.getElementById(key + 'GearBtn');
+            if (panel.contains(e.target) || (gear && gear.contains(e.target))) return;
+            panel.classList.remove('open');
+            document.removeEventListener('click', onDoc, true);
+        };
+        // Deferred so the click that opened the panel doesn't immediately close it.
+        setTimeout(() => document.addEventListener('click', onDoc, true), 0);
+    },
+
+    closeAllFilterPanels() {
+        document.querySelectorAll('.filter-panel.open').forEach(p => p.classList.remove('open'));
+    },
+
+    expandSearch(key) {
+        this.closeAllFilterPanels();
+        const row = document.getElementById(key + 'Toolbar');
+        if (row) row.classList.add('search-expanded');
+    },
+
+    collapseSearch(key) {
+        const inputId = { register: 'searchInput', holidays: 'searchHolidays', completed: 'searchCompleted' }[key];
+        const input = inputId && document.getElementById(inputId);
+        const row = document.getElementById(key + 'Toolbar');
+        if (input) { input.value = ''; input.blur(); }
+        if (row) row.classList.remove('search-expanded');
+        if (key === 'holidays') this.renderHolidays(); else this.renderTable();
+    },
+
+    // Lights up a small dot on the gear icon when a filter besides the
+    // defaults is active, so it's obvious the list is filtered even with
+    // the panel collapsed and no dedicated filter row taking up space.
+    markFilterDot(key) {
+        const dot = document.getElementById(key + 'FilterDot');
+        if (!dot) return;
+        let active = false;
+        if (key === 'register') {
+            active = this.getMultiValues('filterCategoryOpts').join(',') !== 'All' ||
+                this.getMultiValues('filterPriorityOpts').join(',') !== 'All' ||
+                this.getMultiValues('filterStatusOpts').join(',') !== 'All' ||
+                (document.getElementById('filterPending')?.value || 'All') !== 'All' ||
+                (document.getElementById('filterDue')?.value || 'All') !== 'All';
+        } else if (key === 'holidays') {
+            active = (document.getElementById('filterHolidayType')?.value || 'All') !== 'All' ||
+                !!document.getElementById('filterHolidayAlertOnly')?.checked;
+        } else if (key === 'completed') {
+            active = this.getMultiValues('filterCategoryCompletedOpts').join(',') !== 'All';
+        }
+        dot.style.display = active ? 'block' : 'none';
+    },
+
+    clearHolidayFilters() {
+        document.getElementById('searchHolidays').value = '';
+        document.getElementById('filterHolidayType').value = 'All';
+        const alertOnly = document.getElementById('filterHolidayAlertOnly');
+        if (alertOnly) alertOnly.checked = false;
+        this.renderHolidays();
+        this.showToast('Filters cleared', 'success');
+    },
+
     toggleDropdown(id) {
         const panel = document.getElementById(this.msPairs[id]);
         const wrap = document.getElementById(id);
@@ -2238,6 +2307,7 @@ const app = {
         const diffDays = Math.round((target - today) / (1000 * 60 * 60 * 24));
 
         if (mode === 'Today') return diffDays === 0;
+        if (mode === 'DueByToday') return diffDays <= 0; // overdue + due today, as of today's 11:59 PM cutoff
         if (mode === 'Tomorrow') return diffDays === 1;
         if (mode === 'Next7Days') return diffDays >= 1 && diffDays <= 7;
 
@@ -2353,6 +2423,7 @@ const app = {
     renderHolidays() {
         const search = (document.getElementById('searchHolidays')?.value || '').toLowerCase();
         const typeFilter = document.getElementById('filterHolidayType')?.value || 'All';
+        const alertOnly = !!document.getElementById('filterHolidayAlertOnly')?.checked;
 
         // Keep the type filter's own options in sync with whatever Holiday
         // Calendars actually exist (built-in + any the user has added).
@@ -2367,8 +2438,11 @@ const app = {
         let filtered = this.holidays.filter(h => {
             const matchSearch = !search || h.name.toLowerCase().includes(search) || h.date.includes(search);
             const matchType = typeFilter === 'All' || h.type === typeFilter;
-            return matchSearch && matchType;
+            const matchAlert = !alertOnly || h.alert !== false;
+            return matchSearch && matchType && matchAlert;
         });
+
+        this.markFilterDot('holidays');
 
         // Upcoming holidays on top (soonest first), so the ones that matter
         // right now don't get buried under a year's worth of ones that have
@@ -2481,6 +2555,7 @@ const app = {
             `${filtered.length} of ${this.tasks.filter(t => !t.deleted && t.status !== 'Completed').length} entries shown`;
         this.renderTaskRows('taskTableBody', filtered, 'register');
         this.renderTaskCards('taskCardList', filtered, 'register');
+        this.markFilterDot('register');
     },
 
     renderCompleted() {
@@ -2498,6 +2573,7 @@ const app = {
         document.getElementById('entriesCompletedText').textContent = `${filtered.length} completed entries`;
         this.renderTaskRows('completedTableBody', filtered, 'completed');
         this.renderTaskCards('completedCardList', filtered, 'completed');
+        this.markFilterDot('completed');
     },
 
     renderBin() {
@@ -3154,7 +3230,7 @@ const app = {
         const monthName = new Date().toLocaleDateString('en-IN', { month: 'long' });
         const noDue = open.filter(t => !t.dueDate);
         const pendingNow = open.filter(t => (t.status || 'Pending') === 'Pending');
-        const pendingToday = open.filter(t => (t.status || 'Pending') === 'Pending' && this.isDateInRange(t, 'Today'));
+        const pendingToday = open.filter(t => (t.status || 'Pending') === 'Pending' && this.isDateInRange(t, 'DueByToday'));
 
         const todayStr = this.getLocalDateStr(new Date());
         const in7 = new Date(); in7.setDate(in7.getDate() + 7);
@@ -3219,9 +3295,9 @@ const app = {
                 sub: 'As of now'
             }),
             this.dashTile({
-                title: 'Pending Today', count: pendingToday.length, colour: 'var(--red)',
-                ftype: 'pendingToday', fvalue: 'Today',
-                sub: pendingToday.length ? 'Still pending, due today' : 'Nothing pending today'
+                title: 'Pending as on Today', count: pendingToday.length, colour: 'var(--red)',
+                ftype: 'pendingToday', fvalue: 'DueByToday',
+                sub: pendingToday.length ? 'Due today or earlier, still open' : 'Nothing pending as of today'
             })
         ].join('');
 
@@ -3278,7 +3354,7 @@ const app = {
         if (ftype === 'due') {
             document.getElementById('filterDue').value = fvalue;
         } else if (ftype === 'pendingToday') {
-            document.getElementById('filterDue').value = 'Today';
+            document.getElementById('filterDue').value = 'DueByToday';
             this.setMultiValue('filterStatusOpts', 'Pending');
         } else if (ftype === 'category') {
             this.setMultiValue('filterCategoryOpts', fvalue);
@@ -3300,7 +3376,7 @@ const app = {
 
         this.switchTab('Register');
 
-        const labels = { due: 'Due', pendingToday: 'Pending today', category: 'Category', status: 'Status', priority: 'Priority', pending: 'Pending with' };
+        const labels = { due: 'Due', pendingToday: 'Pending as on today', category: 'Category', status: 'Status', priority: 'Priority', pending: 'Pending with' };
         const pretty = { Today: 'Due today', Overdue: 'Overdue', Next7Days: 'Next 7 days', ThisMonth: 'This month', NoDue: 'No due date' };
         this.showToast((labels[ftype] || ftype) + ': ' + (pretty[fvalue] || fvalue), 'info');
     },
