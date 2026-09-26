@@ -298,6 +298,111 @@ const app = {
             .catch(() => this.showToast('Could not copy — select the text manually.', 'warning'));
     },
 
+    /* ---------- REPORT STYLE SAMPLES ---------- */
+    saveReportSample() {
+        const el = document.getElementById('reportSampleText');
+        const text = (el.value || '').trim();
+        if (!text) { this.showToast('Paste a report first.', 'warning'); return; }
+
+        this.cloudRequest({ action: 'saveReportSample', sampleText: text })
+            .then(data => {
+                if (!data || data.status !== 'success') throw new Error((data && data.message) || 'Failed to save sample');
+                el.value = '';
+                this.showToast('Style sample saved.', 'success');
+                this.loadReportSamples();
+            })
+            .catch(err => this.showToast(err.message || 'Failed to save sample', 'error'));
+    },
+
+    loadReportSamples() {
+        const box = document.getElementById('reportSamplesList');
+        if (!box) return;
+        this.cloudRequest({ action: 'listReportSamples' })
+            .then(data => {
+                if (!data || data.status !== 'success') throw new Error((data && data.message) || 'Failed to load samples');
+                const samples = data.samples || [];
+                if (!samples.length) {
+                    box.innerHTML = '<div class="empty-state" style="padding:16px;"><span>No style samples saved yet.</span></div>';
+                    return;
+                }
+                box.innerHTML = samples.map(s => {
+                    const preview = (s.sampleText || '').replace(/\n/g, ' ').substring(0, 90);
+                    return `<div style="display:flex; align-items:center; gap:10px; padding:10px 12px; border-radius:10px; background:var(--input-bg); border:1px solid var(--line);">
+                        <span style="flex:1; min-width:0; font-size:0.82rem; color:var(--label-2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${this.escAttr(s.sampleText || '')}">${this.sanitize(preview)}${(s.sampleText || '').length > 90 ? '…' : ''}</span>
+                        <button type="button" class="btn-icon bad" onclick="app.deleteReportSample('${this.escAttr(s.id)}')" title="Delete sample">${this.SVGS.bin}</button>
+                    </div>`;
+                }).join('');
+            })
+            .catch(() => { box.innerHTML = '<div class="empty-state" style="padding:16px;"><span>Could not load samples — check your Cloud URL.</span></div>'; });
+    },
+
+    deleteReportSample(id) {
+        if (!confirm('Remove this style sample?')) return;
+        this.cloudRequest({ action: 'deleteReportSample', id: id })
+            .then(data => {
+                if (!data || data.status !== 'success') throw new Error((data && data.message) || 'Failed to delete sample');
+                this.showToast('Sample removed.', 'success');
+                this.loadReportSamples();
+            })
+            .catch(err => this.showToast(err.message || 'Failed to delete sample', 'error'));
+    },
+
+    /* ---------- FIXED DAILY ACTIVITIES ---------- */
+    saveFixedTask() {
+        const el = document.getElementById('fixedTaskText');
+        const text = (el.value || '').trim();
+        if (!text) { this.showToast('Describe the activity first.', 'warning'); return; }
+
+        this.cloudRequest({ action: 'saveFixedTask', description: text })
+            .then(data => {
+                if (!data || data.status !== 'success') throw new Error((data && data.message) || 'Failed to save');
+                el.value = '';
+                this.showToast('Fixed activity added.', 'success');
+                this.loadFixedTasks();
+            })
+            .catch(err => this.showToast(err.message || 'Failed to save', 'error'));
+    },
+
+    loadFixedTasks() {
+        const box = document.getElementById('fixedTasksList');
+        if (!box) return;
+        this.cloudRequest({ action: 'listFixedTasks' })
+            .then(data => {
+                if (!data || data.status !== 'success') throw new Error((data && data.message) || 'Failed to load');
+                const items = data.fixedTasks || [];
+                if (!items.length) {
+                    box.innerHTML = '<div class="empty-state" style="padding:16px;"><span>No fixed activities yet.</span></div>';
+                    return;
+                }
+                box.innerHTML = items.map(f => `
+                    <div style="display:flex; align-items:center; gap:10px; padding:10px 12px; border-radius:10px; background:var(--input-bg); border:1px solid var(--line);">
+                        <label style="display:flex; align-items:center; gap:8px; flex:1; min-width:0; cursor:pointer;">
+                            <input type="checkbox" ${f.active ? 'checked' : ''} onchange="app.toggleFixedTask('${this.escAttr(f.id)}', this.checked)" style="width:16px; height:16px; accent-color:var(--accent); flex:0 0 auto;">
+                            <span style="font-size:0.86rem; color:var(--label); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${this.sanitize(f.description)}</span>
+                        </label>
+                        <button type="button" class="btn-icon bad" onclick="app.deleteFixedTask('${this.escAttr(f.id)}')" title="Delete">${this.SVGS.bin}</button>
+                    </div>
+                `).join('');
+            })
+            .catch(() => { box.innerHTML = '<div class="empty-state" style="padding:16px;"><span>Could not load — check your Cloud URL.</span></div>'; });
+    },
+
+    toggleFixedTask(id, active) {
+        this.cloudRequest({ action: 'toggleFixedTask', id: id, active: active })
+            .catch(err => this.showToast(err.message || 'Failed to update', 'error'));
+    },
+
+    deleteFixedTask(id) {
+        if (!confirm('Remove this fixed activity?')) return;
+        this.cloudRequest({ action: 'deleteFixedTask', id: id })
+            .then(data => {
+                if (!data || data.status !== 'success') throw new Error((data && data.message) || 'Failed to delete');
+                this.showToast('Fixed activity removed.', 'success');
+                this.loadFixedTasks();
+            })
+            .catch(err => this.showToast(err.message || 'Failed to delete', 'error'));
+    },
+
     /* ---------- BOOT ---------- */
     /* Stop the browser offering "Saved info" / past entries in any field.
        Runs once on start and again for fields added later (alarm cards, modals). */
@@ -2359,6 +2464,8 @@ const app = {
         if (btn) btn.classList.add('active');
         document.getElementById('screenTitle').textContent = titles[tab] || tab;
 
+        if (tab === 'Config') { this.loadReportSamples(); this.loadFixedTasks(); }
+
         this.renderTable();
     },
 
@@ -2932,6 +3039,7 @@ const app = {
             if (delBtn) delBtn.style.display = 'none';
         }
 
+        this.renderPaymentDetails(hasId ? (this.findTask(id) || {}).paymentDetails : {});
         if (mailBtn) mailBtn.style.display = this.storedEmailId ? '' : 'none';
         this.checkDueHoliday();
         this.checkSlotAvailability();
@@ -2984,6 +3092,74 @@ const app = {
         })).filter(p => p.key || p.value);
     },
 
+    /* ---------- CONDITIONAL PAYMENT FIELDS ----------
+       Domestic Payment + Completed → PO Number / Invoice(s) / Narration.
+       Import Payment + In Progress → Payment % / Payment Type / Payment
+       Against. Matched loosely (case-insensitive, keyword-based) so this
+       still works whatever the exact category names in your list are. ---------- */
+    isDomesticPaymentCategory(cat) {
+        return /domestic/i.test(cat || '') && /payment/i.test(cat || '');
+    },
+
+    isImportPaymentCategory(cat) {
+        return /import/i.test(cat || '') && /payment/i.test(cat || '');
+    },
+
+    updateConditionalFields() {
+        const cat = document.getElementById('taskCategory').value;
+        const status = document.getElementById('taskStatus').value;
+        const statusNorm = String(status || '').trim().toLowerCase();
+
+        const domesticBox = document.getElementById('domesticCompletedFields');
+        const importBox = document.getElementById('importInProgressFields');
+
+        const showDomestic = this.isDomesticPaymentCategory(cat) && statusNorm === 'completed';
+        const showImport = this.isImportPaymentCategory(cat) && statusNorm === 'in progress';
+
+        if (domesticBox) domesticBox.style.display = showDomestic ? '' : 'none';
+        if (importBox) importBox.style.display = showImport ? '' : 'none';
+    },
+
+    renderPaymentDetails(pd) {
+        pd = pd || {};
+        document.getElementById('pdPoNumber').value = pd.poNumber || '';
+        document.getElementById('pdInvoiceNumbers').value = pd.invoiceNumbers || '';
+        document.getElementById('pdNarration').value = pd.narration || '';
+        document.getElementById('pdPaymentPercent').value = pd.paymentPercent || '';
+        this.setSelectValue('pdPaymentType', pd.paymentType || '');
+        this.setSelectValue('pdPaymentAgainst', pd.paymentAgainst || '');
+        this.updateConditionalFields();
+    },
+
+    collectPaymentDetails() {
+        return {
+            poNumber: document.getElementById('pdPoNumber').value.trim(),
+            invoiceNumbers: document.getElementById('pdInvoiceNumbers').value.trim(),
+            narration: document.getElementById('pdNarration').value.trim(),
+            paymentPercent: document.getElementById('pdPaymentPercent').value.trim(),
+            paymentType: document.getElementById('pdPaymentType').value,
+            paymentAgainst: document.getElementById('pdPaymentAgainst').value
+        };
+    },
+
+    // Returns an error message if a required conditional field is missing
+    // for the category+status combo currently selected, or '' if fine.
+    validatePaymentDetails(fields) {
+        if (this.isDomesticPaymentCategory(fields.category) && String(fields.status).trim().toLowerCase() === 'completed') {
+            const pd = this.collectPaymentDetails();
+            if (!pd.poNumber || !pd.invoiceNumbers || !pd.narration) {
+                return 'Domestic Payment marked Completed needs a PO Number, Invoice(s), and Narration.';
+            }
+        }
+        if (this.isImportPaymentCategory(fields.category) && String(fields.status).trim().toLowerCase() === 'in progress') {
+            const pd = this.collectPaymentDetails();
+            if (!pd.paymentPercent || !pd.paymentType || !pd.paymentAgainst) {
+                return 'Import Payment marked In Progress needs Payment %, Payment Type, and Payment Against.';
+            }
+        }
+        return '';
+    },
+
     saveTask(e) {
         if (e && e.preventDefault) e.preventDefault();
 
@@ -3002,8 +3178,12 @@ const app = {
             recurrence: document.getElementById('taskRecurrence').value || 'None',
             notes: document.getElementById('taskNotes').value,
             keyPoints: this.collectKeyPoints(),
+            paymentDetails: this.collectPaymentDetails(),
             updatedAt: Date.now()
         };
+
+        const paymentError = this.validatePaymentDetails(fields);
+        if (paymentError) { this.showToast(paymentError, 'warning'); return; }
 
         const clash = this.slotClash(fields.dueDate, fields.dueTime, this.editingId);
         if (clash) {

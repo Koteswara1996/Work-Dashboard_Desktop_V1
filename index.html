@@ -1552,17 +1552,37 @@
 
         <div class="cfg-section">
             <div class="dash-title">Activity Log</div>
-            <p class="cfg-hint">Task activity (created, edited, completed...) logs itself automatically. Use this for anything else worth noting about your day.</p>
+            <p class="cfg-hint">Your Task Activity Log fills itself in automatically — every task you create, edit, complete, reopen, bin, or restore is logged with its category, status, notes and Key Points, with no typing needed here. This box below is only for something worth reporting that never became a task at all (a call, a meeting, anything off-tracker).</p>
             <div class="sheet-grid" style="gap:10px;">
-                <input autocomplete="off" type="text" id="generalLogActivity" placeholder="What did you do? (e.g. Team standup call)" style="grid-column: 1 / -1;">
+                <input autocomplete="off" type="text" id="generalLogActivity" placeholder="Something NOT already a task (e.g. Team standup call)" style="grid-column: 1 / -1;">
                 <input autocomplete="off" type="text" id="generalLogDetails" placeholder="Details (optional)" style="grid-column: 1 / -1;">
                 <button class="btn-modal primary" style="grid-column: 1 / -1;" onclick="app.submitGeneralLog()">Log this activity</button>
             </div>
         </div>
 
         <div class="cfg-section">
+            <div class="dash-title">Fixed Daily Activities</div>
+            <p class="cfg-hint">Standing tasks you do every working day (e.g. "Daily NOSTRO account reconciliation"). Describe once — every daily report includes it automatically from then on, with no need to log it again. Uncheck to pause one without losing it.</p>
+            <div class="sheet-grid" style="gap:10px;">
+                <input autocomplete="off" type="text" id="fixedTaskText" placeholder="e.g. Daily NOSTRO account reconciliation" style="grid-column: 1 / -1;">
+                <button class="btn-modal primary" style="grid-column: 1 / -1;" onclick="app.saveFixedTask()">Add fixed activity</button>
+            </div>
+            <div id="fixedTasksList" style="margin-top:10px; display:flex; flex-direction:column; gap:8px;"></div>
+        </div>
+
+        <div class="cfg-section">
+            <div class="dash-title">Report Style Samples</div>
+            <p class="cfg-hint">Paste in a report you've already written by hand. The AI will match its style, structure, and level of detail on every future report — the more you add, the closer the match. Only your 3 most recent saved samples are used per report.</p>
+            <div class="sheet-grid" style="gap:10px;">
+                <textarea id="reportSampleText" placeholder="Paste a past daily report here..." style="grid-column: 1 / -1; min-height:100px;"></textarea>
+                <button class="btn-modal primary" style="grid-column: 1 / -1;" onclick="app.saveReportSample()">Save as style sample</button>
+            </div>
+            <div id="reportSamplesList" style="margin-top:10px; display:flex; flex-direction:column; gap:8px;"></div>
+        </div>
+
+        <div class="cfg-section">
             <div class="dash-title">Daily Activity Report</div>
-            <p class="cfg-hint">Summarizes today's Task Activity Log + General Activity Log (and any Key Points on tasks touched today) into a report, using Gemini.</p>
+            <p class="cfg-hint">Summarizes today's Task Activity Log (with full task detail) + General Activity Log + any saved style samples above, into a report written by Gemini.</p>
             <div class="sheet-grid" style="gap:10px;">
                 <input autocomplete="off" type="date" id="dailyReportDate" style="grid-column: 1 / -1;">
                 <button class="btn-modal primary" style="grid-column: 1 / -1;" onclick="app.generateDailyReport()">Generate report</button>
@@ -1682,7 +1702,7 @@
                 <div class="form-row">
                     <div class="form-group">
                         <label>Category <a href="#" class="edit-options-btn" onclick="app.openListManager('categories'); return false;">Edit</a></label>
-                        <select id="taskCategory"><option value="">Select category</option></select>
+                        <select id="taskCategory" onchange="app.updateConditionalFields()"><option value="">Select category</option></select>
                     </div>
                     <div class="form-group">
                         <label>Priority <a href="#" class="edit-options-btn" onclick="app.openListManager('priorities'); return false;">Edit</a></label>
@@ -1692,11 +1712,55 @@
                 <div class="form-row">
                     <div class="form-group">
                         <label>Status <a href="#" class="edit-options-btn" onclick="app.openListManager('statuses'); return false;">Edit</a></label>
-                        <select id="taskStatus"></select>
+                        <select id="taskStatus" onchange="app.updateConditionalFields()"></select>
                     </div>
                     <div class="form-group">
                         <label>Pending With <a href="#" class="edit-options-btn" onclick="app.openListManager('pendingWith'); return false;">Edit</a></label>
                         <select id="taskPendingWith"><option value="">Select person</option></select>
+                    </div>
+                </div>
+                <div id="domesticCompletedFields" style="display:none;">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>PO Number</label>
+                            <input autocomplete="off" type="text" id="pdPoNumber" placeholder="e.g. PO-4521">
+                        </div>
+                        <div class="form-group">
+                            <label>Invoice(s)</label>
+                            <input autocomplete="off" type="text" id="pdInvoiceNumbers" placeholder="e.g. INV-1001, INV-1002">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Narration</label>
+                        <textarea id="pdNarration" placeholder="Narration for this payment..."></textarea>
+                    </div>
+                </div>
+                <div id="importInProgressFields" style="display:none;">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Payment %</label>
+                            <input autocomplete="off" type="number" id="pdPaymentPercent" min="0" max="100" placeholder="e.g. 30">
+                        </div>
+                        <div class="form-group">
+                            <label>Payment Type</label>
+                            <select id="pdPaymentType">
+                                <option value="">Select</option>
+                                <option value="Advance">Advance</option>
+                                <option value="Balance">Balance</option>
+                                <option value="Remaining Balance">Remaining Balance</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Payment Against</label>
+                        <select id="pdPaymentAgainst">
+                            <option value="">Select</option>
+                            <option value="Before Dispatch">Before Dispatch</option>
+                            <option value="Before Production">Before Production</option>
+                            <option value="Against BOE">Against BOE</option>
+                            <option value="Against BL">Against BL</option>
+                            <option value="Against CI">Against CI</option>
+                        </select>
                     </div>
                 </div>
                 <div class="form-group">
