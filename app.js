@@ -3585,7 +3585,7 @@ const app = {
         const monthName = new Date().toLocaleDateString('en-IN', { month: 'long' });
         const noDue = open.filter(t => !t.dueDate);
         const pendingNow = open.filter(t => (t.status || 'Pending') === 'Pending');
-        const pendingToday = open.filter(t => (t.status || 'Pending') === 'Pending' && this.isDateInRange(t, 'DueByToday'));
+        const pendingToday = open.filter(t => this.isDateInRange(t, 'DueByToday'));
 
         const todayStr = this.getLocalDateStr(new Date());
         const in7 = new Date(); in7.setDate(in7.getDate() + 7);
@@ -3710,7 +3710,6 @@ const app = {
             document.getElementById('filterDue').value = fvalue;
         } else if (ftype === 'pendingToday') {
             document.getElementById('filterDue').value = 'DueByToday';
-            this.setMultiValue('filterStatusOpts', 'Pending');
         } else if (ftype === 'category') {
             this.setMultiValue('filterCategoryOpts', fvalue);
         } else if (ftype === 'status') {

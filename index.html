@@ -830,11 +830,14 @@
         .sheet-stat b { display: block; font-size: 1.5rem; font-weight: 800; color: var(--accent); letter-spacing: -0.03em; }
         .sheet-stat span { font-size: 0.72rem; color: var(--label-2); text-transform: uppercase; font-weight: 700; letter-spacing: 0.04em; }
 
-        .cfg-section {
-            margin-bottom: 16px; padding: 18px; border-radius: 20px;
-            background: var(--glass-bg); border: 1px solid var(--glass-border);
-            box-shadow: var(--glass-shadow-sm), var(--glass-inset);
+        .cfg-list {
+            border-radius: 20px; background: var(--glass-bg); border: 1px solid var(--glass-border);
+            box-shadow: var(--glass-shadow-sm), var(--glass-inset); overflow: hidden;
         }
+        .cfg-section {
+            padding: 18px; border-bottom: 1px solid var(--separator);
+        }
+        .cfg-section:last-child { border-bottom: none; }
         .dash-title { margin-bottom: 12px; font-size: 1rem; font-weight: 800; color: var(--label); }
         .sheet-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 10px; }
         .sheet-item {
@@ -1539,6 +1542,7 @@
             <div class="sheet-stat"><b id="badgeBin">0</b><span>In Bin</span></div>
         </div>
 
+        <div class="cfg-list">
         <div class="cfg-section">
             <div class="dash-title">Appearance (iOS Glass Themes)</div>
             <div class="theme-row">
@@ -1685,6 +1689,7 @@
             </div>
             <p class="cfg-hint" id="swVersion" style="margin: 14px 0 0;"></p>
             <p class="cfg-hint" id="installHint" style="margin: 6px 0 0;"></p>
+        </div>
         </div>
     </div>
 
