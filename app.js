@@ -298,6 +298,34 @@ const app = {
             .catch(() => this.showToast('Could not copy — select the text manually.', 'warning'));
     },
 
+    exportDailyReportExcel() {
+        const out = document.getElementById('dailyReportOutput');
+        const text = out ? out.textContent : '';
+        if (!text) { this.showToast('Generate a report first.', 'warning'); return; }
+        if (typeof XLSX === 'undefined') { this.showToast('Excel export library did not load — check your connection and try again.', 'error'); return; }
+
+        const date = document.getElementById('dailyReportDate').value || this.getLocalDateStr(new Date());
+        const generatedAt = new Date().toLocaleString();
+
+        const rows = [
+            ['Daily Activity Report'],
+            ['Date', date],
+            ['Generated', generatedAt],
+            ['Profile', this.currentUser || ''],
+            [],
+            ['Report']
+        ];
+        text.split('\n').forEach(line => rows.push([line]));
+
+        const sheet = XLSX.utils.aoa_to_sheet(rows);
+        sheet['!cols'] = [{ wch: 100 }];
+
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, sheet, 'Daily Report');
+        XLSX.writeFile(workbook, `Daily_Activity_Report_${date}.xlsx`);
+        this.showToast('Excel file downloaded.', 'success');
+    },
+
     /* ---------- REPORT STYLE SAMPLES ---------- */
     saveReportSample() {
         const el = document.getElementById('reportSampleText');
@@ -1565,16 +1593,6 @@ const app = {
             this.lists = stored ? Object.assign({}, defaultLists, JSON.parse(stored)) : defaultLists;
         } catch (e) { this.lists = defaultLists; }
         this.listsUpdatedAt = Number(localStorage.getItem(CONFIG.LISTS_TS_KEY)) || 0;
-
-        if (!localStorage.getItem('pureEnergyCatsCleared')) {
-            localStorage.setItem('pureEnergyCatsCleared', '1');
-            if (this.lists.categories && this.lists.categories.length) {
-                this.lists.categories = [];
-                this.listsUpdatedAt = Date.now();
-                localStorage.setItem(CONFIG.LISTS_TS_KEY, String(this.listsUpdatedAt));
-                localStorage.setItem(CONFIG.LISTS_KEY, JSON.stringify(this.lists));
-            }
-        }
     },
 
     saveLists(bump = true) {
