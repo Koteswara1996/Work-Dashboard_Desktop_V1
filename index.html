@@ -259,7 +259,6 @@
         :root {
             --appbar-h: 64px;
             --tabbar-h: 64px;
-            --sidebar-w: 232px;
             --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
             --ease-spring: cubic-bezier(0.175, 0.885, 0.32, 1.275);
             --font-main: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI", sans-serif;
@@ -315,59 +314,30 @@
         }
         .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
 
-        /* ── SIDEBAR NAV (desktop) — a fixed left rail like a classic
-           admin panel: brand mark up top, then one full-width row per
-           section. Mobile completely overrides every property below in
-           its own block further down, so this only ever applies on
-           desktop. ────────────────────────────────────────────────── */
-        .tabbar-brand {
-            display: flex; align-items: center; gap: 10px; padding: 4px 10px 18px;
-            margin-bottom: 8px; border-bottom: 1px solid var(--glass-border-subtle);
-        }
-        .tabbar-brand-mark {
-            flex-shrink: 0; width: 30px; height: 30px; display: grid; place-items: center;
-            background: var(--accent); border-radius: 9px; color: #fff;
-            box-shadow: 0 4px 14px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.25);
-        }
-        .tabbar-brand-mark svg { width: 16px; height: 16px; stroke: #fff; }
-        .tabbar-brand-title {
-            font-size: 0.92rem; font-weight: 800; color: var(--label);
-            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-        }
+        /* ── SEGMENTED TABS (desktop) ────────────────────────────── */
         .tabbar {
-            display: flex; position: fixed; top: 0; left: 0; bottom: 0; z-index: 200;
-            width: var(--sidebar-w); flex-direction: column; align-items: stretch;
-            gap: 2px; padding: 20px 12px; overflow-y: auto;
-            background: var(--glass-header-bg);
-            border: none; border-right: 1px solid var(--glass-border); border-radius: 0;
-            box-shadow: var(--glass-inset), 4px 0 24px rgba(0,0,0,0.05);
+            display: flex; align-items: center; gap: 4px; padding: 4px;
+            background: var(--fill);
+            border: 1px solid var(--glass-border-subtle); border-radius: 13px;
+            box-shadow: var(--glass-inset);
         }
         .tabbar-btn {
-            position: relative; display: inline-flex; align-items: center; justify-content: flex-start;
-            width: 100%; height: 44px; padding: 0 14px; gap: 10px;
-            font-size: 0.85rem; font-weight: 600; color: var(--label-2);
-            background: transparent; border: none; border-radius: 10px; cursor: pointer; transition: all 0.2s var(--ease);
+            position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+            height: 36px; padding: 0 18px; font-size: 0.85rem; font-weight: 600; color: var(--label-2);
+            background: transparent; border: none; border-radius: 9px; cursor: pointer; transition: all 0.2s var(--ease);
         }
         .tabbar-btn:hover { color: var(--label); background: var(--fill-2); }
         .tabbar-btn.active {
             color: var(--accent); background: var(--glass-bg);
             box-shadow: 0 2px 8px rgba(0,0,0,0.08), var(--glass-inset); font-weight: 700;
         }
-        .tabbar-ico { display: flex; width: 20px; height: 20px; flex-shrink: 0; }
-        .tabbar-ico svg { width: 100%; height: 100%; }
-        .tabbar-lbl { flex: 1 1 auto; text-align: left; }
+        .tabbar-ico { display: none; }
         .badge {
             min-width: 18px; height: 18px; padding: 0 5px; font-size: 0.65rem; font-weight: 700;
             display: inline-flex; align-items: center; justify-content: center; border-radius: 20px;
-            color: var(--label-2); background: var(--fill-2); margin-left: auto;
+            color: var(--label-2); background: var(--fill-2);
         }
         .tabbar-btn.active .badge { background: var(--accent); color: #fff; }
-
-        html[data-shell="desktop"] .appbar { margin-left: var(--sidebar-w); }
-        html[data-shell="desktop"] .content-area { margin-left: var(--sidebar-w); }
-        html[data-shell="desktop"] #toastContainer { left: calc(50% + (var(--sidebar-w) / 2)); }
-        html[data-shell="desktop"] #bulkBar { left: calc(50% + (var(--sidebar-w) / 2)); }
-
         .badge.red { color: #fff; background: var(--red); }
 
         /* ── CONTENT AREA ────────────────────────────────────────── */
@@ -1160,18 +1130,16 @@
         order: 0; position: fixed; left: 16px; right: 16px;
         bottom: calc(16px + env(safe-area-inset-bottom, 0px));
         z-index: 90; margin: 0; height: var(--tabbar-h); padding: 6px;
-        flex-direction: row; width: auto;
         background: var(--glass-header-bg);
         border: 1px solid var(--glass-border);
         border-radius: 26px;
         box-shadow: 0 20px 48px rgba(0,0,0,0.14), var(--glass-inset);
         }
-        html[data-shell="mobile"] .tabbar-btn { flex: 1 1 0; flex-direction: column; justify-content: center; gap: 4px; height: 100%; padding: 4px 2px; font-size: 0.7rem; border-radius: 18px; }
+        html[data-shell="mobile"] .tabbar-btn { flex: 1 1 0; flex-direction: column; gap: 4px; height: 100%; padding: 4px 2px; font-size: 0.7rem; border-radius: 18px; }
         html[data-shell="mobile"] .tabbar-btn.active { background: var(--fill); box-shadow: none; }
         html[data-shell="mobile"] .tabbar-ico { display: block; width: 24px; height: 24px; }
         html[data-shell="mobile"] .tabbar-ico svg { width: 100%; height: 100%; stroke-width: 2; }
-        html[data-shell="mobile"] .tabbar-brand { display: none; }
-        html[data-shell="mobile"] .tabbar-lbl { flex: 0 0 auto; text-align: center; font-size: 0.7rem; font-weight: 600; line-height: 1; }
+        html[data-shell="mobile"] .tabbar-lbl { font-size: 0.7rem; font-weight: 600; line-height: 1; }
         html[data-shell="mobile"] .tabbar-btn .badge { position: absolute; top: 4px; right: 50%; transform: translateX(18px); min-width: 18px; height: 18px; font-size: 0.65rem; padding: 0 5px; }
         html[data-shell="mobile"] .content-area { padding: 16px 16px calc(var(--tabbar-h) + 48px + env(safe-area-inset-bottom, 0px)); }
         html[data-shell="mobile"] #registerTab, html[data-shell="mobile"] #completedTab, html[data-shell="mobile"] #binTab, html[data-shell="mobile"] #holidaysTab { --gutter: 16px; padding: 16px 16px calc(var(--tabbar-h) + 48px + env(safe-area-inset-bottom, 0px)); }
@@ -1335,15 +1303,21 @@
     </script>
 
     <!-- Header -->
-        <nav class="tabbar" id="tabBar" style="display:none;">
-            <div class="tabbar-brand">
-                <span class="tabbar-brand-mark">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
-                        <circle cx="12" cy="12" r="9"/><path d="M8.5 12.3l2.4 2.4 4.6-5"/>
-                    </svg>
-                </span>
-                <span class="tabbar-brand-title">Work Tracker</span>
+
+    <header class="appbar" id="mainAppHeader" style="display:none;">
+        <div class="appbar-left">
+            <span class="appbar-mark" id="appMark">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="9"/><path d="M8.5 12.3l2.4 2.4 4.6-5"/>
+                </svg>
+            </span>
+            <div class="appbar-titles">
+                <div class="appbar-title" id="screenTitle">Overview</div>
+                <div class="appbar-sub" id="headerDate">—</div>
             </div>
+        </div>
+
+        <nav class="tabbar" id="tabBar" style="display:none;">
             <button class="tabbar-btn active" data-tab="Dashboard" onclick="app.switchTab('Dashboard')">
                 <span class="tabbar-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="3" width="7" height="9" rx="2"/><rect x="14" y="3" width="7" height="5" rx="2"/><rect x="14" y="12" width="7" height="9" rx="2"/><rect x="3" y="16" width="7" height="5" rx="2"/></svg></span>
                 <span class="tabbar-lbl">Dashboard</span>
@@ -1372,19 +1346,6 @@
                 <span class="tabbar-lbl">Config</span>
             </button>
         </nav>
-
-    <header class="appbar" id="mainAppHeader" style="display:none;">
-        <div class="appbar-left">
-            <span class="appbar-mark" id="appMark">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
-                    <circle cx="12" cy="12" r="9"/><path d="M8.5 12.3l2.4 2.4 4.6-5"/>
-                </svg>
-            </span>
-            <div class="appbar-titles">
-                <div class="appbar-title" id="screenTitle">Overview</div>
-                <div class="appbar-sub" id="headerDate">—</div>
-            </div>
-        </div>
 
         <div class="appbar-right">
             <div class="autosave" id="saveStatus"><span class="dot"></span> Saved</div>
