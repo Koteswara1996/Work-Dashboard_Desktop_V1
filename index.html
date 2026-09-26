@@ -839,6 +839,51 @@
         }
         .cfg-section:last-child { border-bottom: none; }
         .dash-title { margin-bottom: 12px; font-size: 1rem; font-weight: 800; color: var(--label); }
+
+        /* ── WordPress-admin-style shell: a nav list on one side, one
+           settings panel visible at a time on the other. Desktop shows
+           both side by side; mobile drills down (tap a row → back button
+           returns to the list), since a permanent sidebar doesn't fit a
+           narrow screen. ── */
+        .cfg-shell { display: flex; gap: 20px; align-items: flex-start; }
+        .cfg-nav {
+            flex: 0 0 240px; display: flex; flex-direction: column; gap: 2px;
+            border-radius: 20px; background: var(--glass-bg); border: 1px solid var(--glass-border);
+            box-shadow: var(--glass-shadow-sm), var(--glass-inset); overflow: hidden; padding: 6px;
+        }
+        .cfg-nav-item {
+            display: flex; align-items: center; gap: 10px; padding: 12px 12px; border-radius: 12px;
+            background: transparent; border: none; text-align: left; cursor: pointer;
+            font-size: 0.88rem; font-weight: 600; color: var(--label);
+        }
+        .cfg-nav-item:hover { background: var(--fill); }
+        .cfg-nav-item.active { background: var(--accent); color: #fff; }
+        .cfg-nav-ico { flex: 0 0 auto; font-size: 1rem; }
+        .cfg-nav-label { flex: 1 1 auto; min-width: 0; }
+        .cfg-nav-chevron { flex: 0 0 auto; opacity: 0.5; font-size: 0.9rem; }
+        .cfg-nav-item.active .cfg-nav-chevron { opacity: 0.85; }
+
+        .cfg-panels {
+            flex: 1 1 auto; min-width: 0; border-radius: 20px; background: var(--glass-bg);
+            border: 1px solid var(--glass-border); box-shadow: var(--glass-shadow-sm), var(--glass-inset);
+            overflow: hidden;
+        }
+        .cfg-panel { display: none; padding: 20px; border-bottom: none; }
+        .cfg-panel.active { display: block; }
+        .cfg-back-btn {
+            display: none; width: 100%; text-align: left; padding: 14px 18px; border: none;
+            border-bottom: 1px solid var(--separator); background: var(--fill); color: var(--accent);
+            font-size: 0.9rem; font-weight: 700; cursor: pointer;
+        }
+
+        /* Mobile: one column at a time — list first, tap to drill into a
+           panel, back button returns to the list. */
+        html[data-shell="mobile"] .cfg-shell { flex-direction: column; }
+        html[data-shell="mobile"] .cfg-nav { flex: 1 1 auto; width: 100%; }
+        html[data-shell="mobile"] .cfg-panels { width: 100%; }
+        html[data-shell="mobile"] .cfg-shell:not(.showing-panel) .cfg-panels { display: none; }
+        html[data-shell="mobile"] .cfg-shell.showing-panel .cfg-nav { display: none; }
+        html[data-shell="mobile"] .cfg-shell.showing-panel .cfg-back-btn { display: block; }
         .sheet-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 10px; }
         .sheet-item {
             display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
@@ -1542,8 +1587,26 @@
             <div class="sheet-stat"><b id="badgeBin">0</b><span>In Bin</span></div>
         </div>
 
-        <div class="cfg-list">
-        <div class="cfg-section">
+        <div class="cfg-shell" id="cfgShell">
+            <nav class="cfg-nav" id="cfgNav">
+                <button type="button" class="cfg-nav-item" data-cfg-panel="cfgAppearance" onclick="app.showCfgPanel('cfgAppearance')"><span class="cfg-nav-ico">🎨</span><span class="cfg-nav-label">Appearance (iOS Glass Themes)</span><span class="cfg-nav-chevron">›</span></button>
+                <button type="button" class="cfg-nav-item" data-cfg-panel="cfgActivityLog" onclick="app.showCfgPanel('cfgActivityLog')"><span class="cfg-nav-ico">📝</span><span class="cfg-nav-label">Activity Log</span><span class="cfg-nav-chevron">›</span></button>
+                <button type="button" class="cfg-nav-item" data-cfg-panel="cfgFixedTasks" onclick="app.showCfgPanel('cfgFixedTasks')"><span class="cfg-nav-ico">📌</span><span class="cfg-nav-label">Fixed Daily Activities</span><span class="cfg-nav-chevron">›</span></button>
+                <button type="button" class="cfg-nav-item" data-cfg-panel="cfgReportSamples" onclick="app.showCfgPanel('cfgReportSamples')"><span class="cfg-nav-ico">🧾</span><span class="cfg-nav-label">Report Style Samples</span><span class="cfg-nav-chevron">›</span></button>
+                <button type="button" class="cfg-nav-item" data-cfg-panel="cfgDailyReport" onclick="app.showCfgPanel('cfgDailyReport')"><span class="cfg-nav-ico">📊</span><span class="cfg-nav-label">Daily Activity Report</span><span class="cfg-nav-chevron">›</span></button>
+                <button type="button" class="cfg-nav-item" data-cfg-panel="cfgTextSize" onclick="app.showCfgPanel('cfgTextSize')"><span class="cfg-nav-ico">🔤</span><span class="cfg-nav-label">Text Size</span><span class="cfg-nav-chevron">›</span></button>
+                <button type="button" class="cfg-nav-item" data-cfg-panel="cfgCloudSync" onclick="app.showCfgPanel('cfgCloudSync')"><span class="cfg-nav-ico">☁️</span><span class="cfg-nav-label">Cloud Sync</span><span class="cfg-nav-chevron">›</span></button>
+                <button type="button" class="cfg-nav-item" data-cfg-panel="cfgDataBackup" onclick="app.showCfgPanel('cfgDataBackup')"><span class="cfg-nav-ico">💾</span><span class="cfg-nav-label">Data Backup</span><span class="cfg-nav-chevron">›</span></button>
+                <button type="button" class="cfg-nav-item" data-cfg-panel="cfgAlarmSound" onclick="app.showCfgPanel('cfgAlarmSound')"><span class="cfg-nav-ico">🔔</span><span class="cfg-nav-label">Alarm Sound</span><span class="cfg-nav-chevron">›</span></button>
+                <button type="button" class="cfg-nav-item" data-cfg-panel="cfgWalkReminder" onclick="app.showCfgPanel('cfgWalkReminder')"><span class="cfg-nav-ico">🚶</span><span class="cfg-nav-label">Walk Reminder</span><span class="cfg-nav-chevron">›</span></button>
+                <button type="button" class="cfg-nav-item" data-cfg-panel="cfgWaterReminder" onclick="app.showCfgPanel('cfgWaterReminder')"><span class="cfg-nav-ico">💧</span><span class="cfg-nav-label">Water Reminder</span><span class="cfg-nav-chevron">›</span></button>
+                <button type="button" class="cfg-nav-item" data-cfg-panel="cfgTimeSlots" onclick="app.showCfgPanel('cfgTimeSlots')"><span class="cfg-nav-ico">⏱️</span><span class="cfg-nav-label">Time Slots</span><span class="cfg-nav-chevron">›</span></button>
+                <button type="button" class="cfg-nav-item" data-cfg-panel="cfgToolsSettings" onclick="app.showCfgPanel('cfgToolsSettings')"><span class="cfg-nav-ico">⚙️</span><span class="cfg-nav-label">Settings & Tools</span><span class="cfg-nav-chevron">›</span></button>
+                <button type="button" class="cfg-nav-item" data-cfg-panel="cfgSystem" onclick="app.showCfgPanel('cfgSystem')"><span class="cfg-nav-ico">📱</span><span class="cfg-nav-label">System</span><span class="cfg-nav-chevron">›</span></button>
+            </nav>
+            <div class="cfg-panels" id="cfgPanels">
+                <button type="button" class="cfg-back-btn" id="cfgBackBtn" onclick="app.showCfgNav()">‹ Settings</button>
+<div class="cfg-section cfg-panel" id="cfgAppearance" data-cfg-panel="cfgAppearance">
             <div class="dash-title">Appearance (iOS Glass Themes)</div>
             <div class="theme-row">
                 <button class="theme-btn" data-theme="pearl" onclick="app.applyTheme('pearl')">⚪ Pearl</button>
@@ -1553,8 +1616,7 @@
                 <button class="theme-btn" data-theme="hero3d" onclick="app.applyTheme('hero3d')">🔮 3D Hero</button>
             </div>
         </div>
-
-        <div class="cfg-section">
+<div class="cfg-section cfg-panel" id="cfgActivityLog" data-cfg-panel="cfgActivityLog">
             <div class="dash-title">Activity Log</div>
             <p class="cfg-hint">Your Task Activity Log fills itself in automatically — every task you create, edit, complete, reopen, bin, or restore is logged with its category, status, notes and Key Points, with no typing needed here. This box below is only for something worth reporting that never became a task at all (a call, a meeting, anything off-tracker).</p>
             <div class="sheet-grid" style="gap:10px;">
@@ -1563,8 +1625,7 @@
                 <button class="btn-modal primary" style="grid-column: 1 / -1;" onclick="app.submitGeneralLog()">Log this activity</button>
             </div>
         </div>
-
-        <div class="cfg-section">
+<div class="cfg-section cfg-panel" id="cfgFixedTasks" data-cfg-panel="cfgFixedTasks">
             <div class="dash-title">Fixed Daily Activities</div>
             <p class="cfg-hint">Standing tasks you do every working day (e.g. "Daily NOSTRO account reconciliation"). Describe once — every daily report includes it automatically from then on, with no need to log it again. Uncheck to pause one without losing it.</p>
             <div class="sheet-grid" style="gap:10px;">
@@ -1573,8 +1634,7 @@
             </div>
             <div id="fixedTasksList" style="margin-top:10px; display:flex; flex-direction:column; gap:8px;"></div>
         </div>
-
-        <div class="cfg-section">
+<div class="cfg-section cfg-panel" id="cfgReportSamples" data-cfg-panel="cfgReportSamples">
             <div class="dash-title">Report Style Samples</div>
             <p class="cfg-hint">Paste in a report you've already written by hand. The AI will match its style, structure, and level of detail on every future report — the more you add, the closer the match. Only your 3 most recent saved samples are used per report.</p>
             <div class="sheet-grid" style="gap:10px;">
@@ -1583,8 +1643,7 @@
             </div>
             <div id="reportSamplesList" style="margin-top:10px; display:flex; flex-direction:column; gap:8px;"></div>
         </div>
-
-        <div class="cfg-section">
+<div class="cfg-section cfg-panel" id="cfgDailyReport" data-cfg-panel="cfgDailyReport">
             <div class="dash-title">Daily Activity Report</div>
             <p class="cfg-hint">Summarizes today's Task Activity Log (with full task detail) + General Activity Log + any saved style samples above, into a report written by Gemini.</p>
             <div class="sheet-grid" style="gap:10px;">
@@ -1597,8 +1656,7 @@
                 <button class="btn-modal secondary" style="grid-column: 1 / -1;" onclick="app.exportDailyReportExcel()">Download as Excel</button>
             </div>
         </div>
-
-        <div class="cfg-section">
+<div class="cfg-section cfg-panel" id="cfgTextSize" data-cfg-panel="cfgTextSize">
             <div class="dash-title">Text Size</div>
             <p class="cfg-hint">Default text size for the whole app. Tap to switch — takes effect immediately.</p>
             <div class="theme-row">
@@ -1608,8 +1666,7 @@
                 <button class="theme-btn textsize-btn" data-size="xlarge" onclick="app.applyTextSize('xlarge')">A X-Large</button>
             </div>
         </div>
-
-        <div class="cfg-section">
+<div class="cfg-section cfg-panel" id="cfgCloudSync" data-cfg-panel="cfgCloudSync">
             <div class="dash-title">Cloud Sync</div>
             <div class="sheet-grid">
                 <button class="sheet-item" onclick="app.syncCycle(true)"><span class="ico">↻</span>Sync now</button>
@@ -1618,8 +1675,7 @@
                 <button class="sheet-item" onclick="app.openSyncSetup()"><span class="ico">🔗</span>Connection</button>
             </div>
         </div>
-
-        <div class="cfg-section">
+<div class="cfg-section cfg-panel" id="cfgDataBackup" data-cfg-panel="cfgDataBackup">
             <div class="dash-title">Data Backup</div>
             <div class="sheet-grid">
                 <button class="sheet-item" onclick="app.exportData('csv')"><span class="ico">💾</span>Export CSV</button>
@@ -1627,14 +1683,12 @@
                 <button class="sheet-item" onclick="app.findDuplicates()"><span class="ico">⧉</span>Duplicates</button>
             </div>
         </div>
-
-        <div class="cfg-section">
+<div class="cfg-section cfg-panel" id="cfgAlarmSound" data-cfg-panel="cfgAlarmSound">
             <div class="dash-title">Alarm Sound</div>
             <p class="cfg-hint">Plays when a task goes past its deadline. Tap a name to use it, or ▶ to preview.</p>
             <div class="sound-list" id="alarmSoundList"></div>
         </div>
-
-        <div class="cfg-section">
+<div class="cfg-section cfg-panel" id="cfgWalkReminder" data-cfg-panel="cfgWalkReminder">
             <div class="dash-title">Walk Reminder</div>
             <p class="cfg-hint">Nudges you to leave the desk while you work. It alerts at each slot in the window below, with the same sound as a task alert.</p>
             <div class="walk-row">
@@ -1646,8 +1700,7 @@
             </div>
             <p class="cfg-hint" id="walkNextHint" style="margin: 12px 0 0;"></p>
         </div>
-
-        <div class="cfg-section">
+<div class="cfg-section cfg-panel" id="cfgWaterReminder" data-cfg-panel="cfgWaterReminder">
             <div class="dash-title">Water Reminder</div>
             <p class="cfg-hint">Nudges you to drink water through the day. Same alert style as the walk reminder, on its own schedule.</p>
             <div class="walk-row">
@@ -1659,8 +1712,7 @@
             </div>
             <p class="cfg-hint" id="waterNextHint" style="margin: 12px 0 0;"></p>
         </div>
-
-        <div class="cfg-section">
+<div class="cfg-section cfg-panel" id="cfgTimeSlots" data-cfg-panel="cfgTimeSlots">
             <div class="dash-title">Time Slots</div>
             <p class="cfg-hint">Keeps two tasks off the same time. A scheduled task holds the clock for the minutes below, and anything booked inside that window is turned away with the next free time.</p>
             <div class="walk-row">
@@ -1669,8 +1721,7 @@
             </div>
             <p class="cfg-hint" id="slotHint" style="margin: 12px 0 0;"></p>
         </div>
-
-        <div class="cfg-section">
+<div class="cfg-section cfg-panel" id="cfgToolsSettings" data-cfg-panel="cfgToolsSettings">
             <div class="dash-title">Settings & Tools</div>
             <div class="sheet-grid">
                 <button class="sheet-item" onclick="app.openListManager('categories')"><span class="ico">⚙️</span>Lists</button>
@@ -1678,8 +1729,7 @@
                 <button class="sheet-item" onclick="app.testAlarmSound()"><span class="ico">🔔</span>Test Alarm</button>
             </div>
         </div>
-
-        <div class="cfg-section" id="appSection">
+<div class="cfg-section cfg-panel" id="cfgSystem" data-cfg-panel="cfgSystem">
             <div class="dash-title">System</div>
             <div class="sheet-grid">
                 <button class="sheet-item" id="installBtn" style="display:none;" onclick="pwa.install()"><span class="ico">⬇️</span>Install App</button>
@@ -1690,6 +1740,7 @@
             <p class="cfg-hint" id="swVersion" style="margin: 14px 0 0;"></p>
             <p class="cfg-hint" id="installHint" style="margin: 6px 0 0;"></p>
         </div>
+            </div>
         </div>
     </div>
 
@@ -1943,4 +1994,4 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script src="./app.js"></script>
 </body>
-</html>
+</html>

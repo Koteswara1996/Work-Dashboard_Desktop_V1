@@ -376,6 +376,40 @@ const app = {
     },
 
     /* ---------- FIXED DAILY ACTIVITIES ---------- */
+    /* ---------- CONFIG TAB: sidebar-nav + single-panel shell ----------
+       Desktop shows the nav list and the active panel side by side.
+       Mobile shows one at a time — tapping a nav row drills into that
+       panel with a back button; entering the Config tab always starts
+       back at the list on mobile, so it reads like a settings menu. ---------- */
+    CFG_LAST_PANEL_KEY: 'pureEnergyCfgLastPanel',
+
+    enterCfgTab() {
+        const shell = document.getElementById('cfgShell');
+        if (!shell) return;
+        const last = localStorage.getItem(this.CFG_LAST_PANEL_KEY);
+        const first = document.querySelector('.cfg-nav-item')?.dataset.cfgPanel;
+        this.setCfgActivePanel(last || first, false);
+        shell.classList.remove('showing-panel'); // always start at the list on mobile
+    },
+
+    setCfgActivePanel(slug, persist = true) {
+        if (!slug) return;
+        document.querySelectorAll('.cfg-nav-item').forEach(el => el.classList.toggle('active', el.dataset.cfgPanel === slug));
+        document.querySelectorAll('.cfg-panel').forEach(el => el.classList.toggle('active', el.dataset.cfgPanel === slug));
+        if (persist) localStorage.setItem(this.CFG_LAST_PANEL_KEY, slug);
+    },
+
+    showCfgPanel(slug) {
+        this.setCfgActivePanel(slug, true);
+        const shell = document.getElementById('cfgShell');
+        if (shell) shell.classList.add('showing-panel');
+    },
+
+    showCfgNav() {
+        const shell = document.getElementById('cfgShell');
+        if (shell) shell.classList.remove('showing-panel');
+    },
+
     saveFixedTask() {
         const el = document.getElementById('fixedTaskText');
         const text = (el.value || '').trim();
@@ -2515,7 +2549,7 @@ const app = {
         if (btn) btn.classList.add('active');
         document.getElementById('screenTitle').textContent = titles[tab] || tab;
 
-        if (tab === 'Config') { this.loadReportSamples(); this.loadFixedTasks(); }
+        if (tab === 'Config') { this.loadReportSamples(); this.loadFixedTasks(); this.enterCfgTab(); }
 
         this.renderTable();
     },
