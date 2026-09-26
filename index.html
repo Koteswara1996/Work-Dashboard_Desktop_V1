@@ -435,6 +435,12 @@
             color: var(--label); cursor: pointer; flex: 1 1 auto; justify-content: center; white-space: nowrap;
         }
         .fp-action-btn.danger { color: var(--red-ink); }
+        #taskKeyPoints { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+        .keypoint-row { display: flex; gap: 8px; align-items: center; }
+        .keypoint-row .kp-key { flex: 0 0 38%; }
+        .keypoint-row .kp-value { flex: 1 1 auto; min-width: 0; }
+        .keypoint-row input { padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--input-bg); color: var(--label); font-size: 0.86rem; }
+        .keypoint-row .kp-remove { flex: 0 0 auto; }
         /* search-expanded: hide everything except the search bar itself */
         .compact-toolbar.search-expanded > *:not(.toolbar-search-wrap) { display: none !important; }
         .compact-toolbar.search-expanded .toolbar-search-wrap { flex: 1 1 100%; }
@@ -1545,6 +1551,29 @@
         </div>
 
         <div class="cfg-section">
+            <div class="dash-title">Activity Log</div>
+            <p class="cfg-hint">Task activity (created, edited, completed...) logs itself automatically. Use this for anything else worth noting about your day.</p>
+            <div class="sheet-grid" style="gap:10px;">
+                <input autocomplete="off" type="text" id="generalLogActivity" placeholder="What did you do? (e.g. Team standup call)" style="grid-column: 1 / -1;">
+                <input autocomplete="off" type="text" id="generalLogDetails" placeholder="Details (optional)" style="grid-column: 1 / -1;">
+                <button class="btn-modal primary" style="grid-column: 1 / -1;" onclick="app.submitGeneralLog()">Log this activity</button>
+            </div>
+        </div>
+
+        <div class="cfg-section">
+            <div class="dash-title">Daily Activity Report</div>
+            <p class="cfg-hint">Summarizes today's Task Activity Log + General Activity Log (and any Key Points on tasks touched today) into a report, using Gemini.</p>
+            <div class="sheet-grid" style="gap:10px;">
+                <input autocomplete="off" type="date" id="dailyReportDate" style="grid-column: 1 / -1;">
+                <button class="btn-modal primary" style="grid-column: 1 / -1;" onclick="app.generateDailyReport()">Generate report</button>
+            </div>
+            <div id="dailyReportOutput" style="display:none; margin-top:12px; padding:14px; border-radius:14px; background:var(--input-bg); border:1px solid var(--line); white-space:pre-wrap; font-size:0.86rem; line-height:1.6; color:var(--label);"></div>
+            <div class="sheet-grid" id="dailyReportActions" style="display:none; margin-top:10px; gap:10px;">
+                <button class="btn-modal secondary" style="grid-column: 1 / -1;" onclick="app.copyDailyReport()">Copy report text</button>
+            </div>
+        </div>
+
+        <div class="cfg-section">
             <div class="dash-title">Text Size</div>
             <p class="cfg-hint">Default text size for the whole app. Tap to switch — takes effect immediately.</p>
             <div class="theme-row">
@@ -1697,6 +1726,13 @@
                 <div class="form-group">
                     <label>Notes</label>
                     <textarea autocomplete="off" id="taskNotes" placeholder="Additional notes or context..."></textarea>
+                </div>
+                <div class="form-group">
+                    <label style="display:flex; align-items:center; justify-content:space-between;">
+                        <span>Key Points <span style="font-weight:400; text-transform:none; letter-spacing:0; color:var(--label-2);">(feeds the daily AI report)</span></span>
+                        <button type="button" class="fp-action-btn" style="flex:0 0 auto; padding:4px 10px;" onclick="app.addKeyPointRow()">+ Add</button>
+                    </label>
+                    <div id="taskKeyPoints"></div>
                 </div>
                 <div class="modal-buttons">
                     <button type="button" class="btn-modal secondary" id="viewOriginalEmailBtn" style="display:none;" onclick="app.openStoredEmail()">Open Mail</button>

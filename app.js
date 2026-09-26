@@ -222,6 +222,82 @@ const app = {
         }).then(res => res.json());
     },
 
+    /* ---------- ACTIVITY LOG (fire-and-forget: never blocks or fails the
+       actual task action if the cloud URL is unset or the request fails) ---------- */
+    logTaskActivity(task, action, details) {
+        if (!task || !this.currentUser) return;
+        if ((localStorage.getItem(CONFIG.SYNC_URL_KEY) || "").trim() === "") return;
+        this.cloudRequest({
+            action: 'logActivity',
+            logType: 'task',
+            entry: {
+                taskId: task.id,
+                taskDescription: task.description,
+                action: action,
+                details: details || ''
+            }
+        }).catch(() => {});
+    },
+
+    logGeneralActivity(activity, details) {
+        if (!this.currentUser) return Promise.reject(new Error('No profile'));
+        if ((localStorage.getItem(CONFIG.SYNC_URL_KEY) || "").trim() === "") return Promise.reject(new Error('Cloud URL is not configured (Setup)'));
+        return this.cloudRequest({
+            action: 'logActivity',
+            logType: 'general',
+            entry: { activity: activity, details: details || '' }
+        });
+    },
+
+    submitGeneralLog() {
+        const activityEl = document.getElementById('generalLogActivity');
+        const detailsEl = document.getElementById('generalLogDetails');
+        const activity = (activityEl.value || '').trim();
+        if (!activity) { this.showToast('Describe what you did first.', 'warning'); return; }
+
+        this.logGeneralActivity(activity, (detailsEl.value || '').trim())
+            .then(data => {
+                if (!data || data.status !== 'success') throw new Error((data && data.message) || 'Failed to log activity');
+                activityEl.value = '';
+                detailsEl.value = '';
+                this.showToast('Activity logged.', 'success');
+            })
+            .catch(err => this.showToast(err.message || 'Failed to log activity', 'error'));
+    },
+
+    generateDailyReport() {
+        const dateEl = document.getElementById('dailyReportDate');
+        const date = dateEl.value || this.getLocalDateStr(new Date());
+        const out = document.getElementById('dailyReportOutput');
+        const actions = document.getElementById('dailyReportActions');
+
+        out.style.display = 'block';
+        out.textContent = 'Generating…';
+        actions.style.display = 'none';
+
+        this.cloudRequest({ action: 'generateDailyReport', date: date })
+            .then(data => {
+                if (!data || data.status !== 'success') throw new Error((data && data.message) || 'Failed to generate report');
+                out.textContent = data.report;
+                actions.style.display = 'grid';
+                this.showToast('Report generated.', 'success');
+            })
+            .catch(err => {
+                out.textContent = '';
+                out.style.display = 'none';
+                this.showToast(err.message || 'Failed to generate report', 'error');
+            });
+    },
+
+    copyDailyReport() {
+        const out = document.getElementById('dailyReportOutput');
+        const text = out ? out.textContent : '';
+        if (!text) return;
+        navigator.clipboard.writeText(text)
+            .then(() => this.showToast('Report copied.', 'success'))
+            .catch(() => this.showToast('Could not copy — select the text manually.', 'warning'));
+    },
+
     /* ---------- BOOT ---------- */
     /* Stop the browser offering "Saved info" / past entries in any field.
        Runs once on start and again for fields added later (alarm cards, modals). */
@@ -254,6 +330,8 @@ const app = {
         this.loadData();
         this.loadHolidays();
         this.applyTextSize();
+        const reportDateEl = document.getElementById('dailyReportDate');
+        if (reportDateEl && !reportDateEl.value) reportDateEl.value = this.getLocalDateStr(new Date());
         this.purgeOldBin();
         this.initViewMode();
         this.initCardSwipe();
@@ -2838,10 +2916,12 @@ const app = {
             document.getElementById('taskMailChain').value = t.mailChain || '';
             document.getElementById('taskRecurrence').value = t.recurrence || 'None';
             document.getElementById('taskNotes').value = t.notes || '';
+            this.renderKeyPoints(t.keyPoints || []);
             if (delBtn) delBtn.style.display = t.deleted ? 'none' : '';
         } else {
             this.editingId = null;
             this.storedEmailId = emailIdForNew || null;
+            this.renderKeyPoints([]);
 
             document.getElementById('modalTitle').textContent = 'New Entry';
             const pri = this.lists.priorities.indexOf('Medium') !== -1 ? 'Medium' : (this.lists.priorities[0] || '');
@@ -2873,6 +2953,37 @@ const app = {
         this.storedEmailId = null;
     },
 
+    /* ---------- KEY POINTS (structured key/value fields per task, used
+       as extra context for the AI daily report) ---------- */
+    renderKeyPoints(points) {
+        const box = document.getElementById('taskKeyPoints');
+        if (!box) return;
+        box.innerHTML = '';
+        (points || []).forEach(p => this.addKeyPointRow(p.key || '', p.value || ''));
+    },
+
+    addKeyPointRow(key = '', value = '') {
+        const box = document.getElementById('taskKeyPoints');
+        if (!box) return;
+        const row = document.createElement('div');
+        row.className = 'keypoint-row';
+        row.innerHTML = `
+            <input type="text" class="kp-key" placeholder="Key (e.g. Amount)" value="${this.escAttr(key)}">
+            <input type="text" class="kp-value" placeholder="Value (e.g. ₹50,000)" value="${this.escAttr(value)}">
+            <button type="button" class="btn-icon bad kp-remove" onclick="this.closest('.keypoint-row').remove()" title="Remove">${this.SVGS.bin}</button>
+        `;
+        box.appendChild(row);
+    },
+
+    collectKeyPoints() {
+        const box = document.getElementById('taskKeyPoints');
+        if (!box) return [];
+        return Array.from(box.querySelectorAll('.keypoint-row')).map(row => ({
+            key: row.querySelector('.kp-key').value.trim(),
+            value: row.querySelector('.kp-value').value.trim()
+        })).filter(p => p.key || p.value);
+    },
+
     saveTask(e) {
         if (e && e.preventDefault) e.preventDefault();
 
@@ -2890,6 +3001,7 @@ const app = {
             mailChain: document.getElementById('taskMailChain').value.trim(),
             recurrence: document.getElementById('taskRecurrence').value || 'None',
             notes: document.getElementById('taskNotes').value,
+            keyPoints: this.collectKeyPoints(),
             updatedAt: Date.now()
         };
 
@@ -2913,6 +3025,7 @@ const app = {
             if (!task) { this.showToast('That entry is no longer available.', 'error'); this.closeTaskModal(); return; }
 
             const dueChanged = (task.dueDate || '') !== fields.dueDate || (task.dueTime || '') !== fields.dueTime;
+            const statusChanged = task.status !== fields.status;
             Object.assign(task, fields);
             if (dueChanged) { task.lastAckDate = null; task.snoozeUntil = null; }
             if (this.storedEmailId) task.emailId = this.storedEmailId;
@@ -2922,6 +3035,11 @@ const app = {
             } else {
                 task.completedDate = null;
             }
+
+            const changeNotes = [];
+            if (dueChanged) changeNotes.push('due date/time changed');
+            if (statusChanged) changeNotes.push('status → ' + fields.status);
+            this.logTaskActivity(task, 'edited', changeNotes.join('; '));
         } else {
             const task = Object.assign({
                 id: this.newId(),
@@ -2935,6 +3053,7 @@ const app = {
             }, fields);
             if (task.status === 'Completed') task.completedDate = todayStr;
             this.tasks.push(task);
+            this.logTaskActivity(task, 'created', '');
         }
 
         this.closeTaskModal();
@@ -3008,6 +3127,7 @@ const app = {
         this.saveData();
         this.renderTable();
         this.processEngine();
+        this.logTaskActivity(t, 'completed', '');
         this.showToast(
             repeat ? 'Done — next occurrence scheduled.' : 'Marked complete.',
             'success',
@@ -3040,6 +3160,7 @@ const app = {
         this.saveData();
         this.renderTable();
         this.processEngine();
+        this.logTaskActivity(t, 'reopened', '');
         this.showToast('Entry reopened.', 'success');
         this.syncToGoogleSheets();
     },
@@ -3057,6 +3178,7 @@ const app = {
 
         this.saveData();
         this.renderTable();
+        this.logTaskActivity(t, 'binned', '');
         this.showToast('Moved to Bin.', 'success', { label: 'Undo', onClick: () => this.restoreTask(id) });
         this.syncToGoogleSheets();
     },
@@ -3072,6 +3194,7 @@ const app = {
         this.saveData();
         this.renderTable();
         this.processEngine();
+        this.logTaskActivity(t, 'restored', '');
         this.showToast('Entry restored.', 'success');
         this.syncToGoogleSheets();
     },
@@ -3087,6 +3210,7 @@ const app = {
 
         this.saveData();
         this.renderTable();
+        this.logTaskActivity(t, 'deleted permanently', '');
         this.showToast('Entry deleted permanently.', 'success');
         this.syncToGoogleSheets();
     },
