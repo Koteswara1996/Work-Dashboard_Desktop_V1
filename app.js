@@ -461,6 +461,7 @@ const app = {
         this.watchAutofill();
         this.loadLists();
         this.loadData();
+        this.repairListsFromTaskData();
         this.loadHolidays();
         this.applyTextSize();
         const reportDateEl = document.getElementById('dailyReportDate');
@@ -1604,6 +1605,38 @@ const app = {
         this.populateDropdowns();
         this.renderTable();
         if (bump) this.syncToGoogleSheets();
+    },
+
+    // Self-heals the option lists (Category, Priority, Status, Pending With)
+    // from what your actual tasks are using. The Filter dropdowns already
+    // did this at display time via a "union" with this.tasks, so real
+    // category/priority/status/pendingWith values were never actually lost
+    // even after the old list got emptied — they just weren't showing up
+    // in the entry screen's dropdown or its "Edit" list manager. This
+    // makes that recovery permanent: it writes the real values back into
+    // the saved list itself, once, so it's fixed everywhere from here on.
+    repairListsFromTaskData() {
+        const fieldsToHeal = [
+            ['categories', 'category'],
+            ['priorities', 'priority'],
+            ['statuses', 'status'],
+            ['pendingWith', 'pendingWith']
+        ];
+        let changed = false;
+
+        fieldsToHeal.forEach(([listKey, taskField]) => {
+            if (!Array.isArray(this.lists[listKey])) this.lists[listKey] = [];
+            this.tasks.forEach(t => {
+                if (t.purged) return;
+                const v = t[taskField];
+                if (v && this.lists[listKey].indexOf(v) === -1) {
+                    this.lists[listKey].push(v);
+                    changed = true;
+                }
+            });
+        });
+
+        if (changed) this.saveLists(true);
     },
 
     /* ---------- HOLIDAY CALENDAR (persisted, editable per user) ---------- */
