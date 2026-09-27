@@ -1593,6 +1593,7 @@
                 <button type="button" class="cfg-nav-item" data-cfg-panel="cfgAppearance" onclick="app.showCfgPanel('cfgAppearance')"><span class="cfg-nav-ico">🎨</span><span class="cfg-nav-label">Appearance (iOS Glass Themes)</span><span class="cfg-nav-chevron">›</span></button>
                 <button type="button" class="cfg-nav-item" data-cfg-panel="cfgActivityLog" onclick="app.showCfgPanel('cfgActivityLog')"><span class="cfg-nav-ico">📝</span><span class="cfg-nav-label">Activity Log</span><span class="cfg-nav-chevron">›</span></button>
                 <button type="button" class="cfg-nav-item" data-cfg-panel="cfgFixedTasks" onclick="app.showCfgPanel('cfgFixedTasks')"><span class="cfg-nav-ico">📌</span><span class="cfg-nav-label">Fixed Daily Activities</span><span class="cfg-nav-chevron">›</span></button>
+                <button type="button" class="cfg-nav-item" data-cfg-panel="cfgLeaveDays" onclick="app.showCfgPanel('cfgLeaveDays')"><span class="cfg-nav-ico">🌴</span><span class="cfg-nav-label">Leave Days</span><span class="cfg-nav-chevron">›</span></button>
                 <button type="button" class="cfg-nav-item" data-cfg-panel="cfgReportSamples" onclick="app.showCfgPanel('cfgReportSamples')"><span class="cfg-nav-ico">🧾</span><span class="cfg-nav-label">Report Style Samples</span><span class="cfg-nav-chevron">›</span></button>
                 <button type="button" class="cfg-nav-item" data-cfg-panel="cfgDailyReport" onclick="app.showCfgPanel('cfgDailyReport')"><span class="cfg-nav-ico">📊</span><span class="cfg-nav-label">Daily Activity Report</span><span class="cfg-nav-chevron">›</span></button>
                 <button type="button" class="cfg-nav-item" data-cfg-panel="cfgTextSize" onclick="app.showCfgPanel('cfgTextSize')"><span class="cfg-nav-ico">🔤</span><span class="cfg-nav-label">Text Size</span><span class="cfg-nav-chevron">›</span></button>
@@ -1634,6 +1635,12 @@
                 <button class="btn-modal primary" style="grid-column: 1 / -1;" onclick="app.saveFixedTask()">Add fixed activity</button>
             </div>
             <div id="fixedTasksList" style="margin-top:10px; display:flex; flex-direction:column; gap:8px;"></div>
+        </div>
+<div class="cfg-section cfg-panel" id="cfgLeaveDays" data-cfg-panel="cfgLeaveDays">
+            <div class="dash-title">Leave Days</div>
+            <p class="cfg-hint">Mark a day where there's genuinely nothing to do on the tracker. Leave days count as non-working for the "due on a holiday/Sunday" alert choice, and marking one is never logged as activity, so it won't show up in the daily report.</p>
+            <button class="btn-modal primary" id="leaveTodayBtn" onclick="app.toggleTodayLeave()" style="margin-bottom:14px;">Mark Today as Leave</button>
+            <div id="leaveDaysList" style="display:flex; flex-direction:column; gap:8px;"></div>
         </div>
 <div class="cfg-section cfg-panel" id="cfgReportSamples" data-cfg-panel="cfgReportSamples">
             <div class="dash-title">Report Style Samples</div>
@@ -1767,6 +1774,11 @@
                         <select id="taskPriority"></select>
                     </div>
                 </div>
+                <div class="form-group" id="subCategoryField" style="display:none;">
+                    <label>Sub Category <a href="#" class="edit-options-btn" onclick="app.openSubCategoryRules(); return false;">Manage rules</a></label>
+                    <select id="taskSubCategory" onchange="app.renderSubCategoryFields()"><option value="">Select Sub Category</option></select>
+                    <div id="subCategoryRuleFields" style="margin-top:10px; display:flex; flex-direction:column; gap:10px;"></div>
+                </div>
                 <div class="form-row">
                     <div class="form-group">
                         <label>Status <a href="#" class="edit-options-btn" onclick="app.openListManager('statuses'); return false;">Edit</a></label>
@@ -1830,6 +1842,13 @@
                     <div class="due-hint" id="dueHolidayHint"></div>
                     <div class="due-hint" id="dueSlotHint"></div>
                 </div>
+                <div class="form-group">
+                    <label>Deadline <span style="font-weight:400; text-transform:none; letter-spacing:0; color:var(--label-2);">(optional — separate hard cutoff; you'll be alerted once it's crossed)</span></label>
+                    <div style="display:flex; gap:12px;">
+                        <input autocomplete="off" type="date" id="taskDeadlineDate">
+                        <input autocomplete="off" type="time" id="taskDeadlineTime">
+                    </div>
+                </div>
                 <div class="form-row">
                     <div class="form-group">
                         <label>Mail Chain / Reference</label>
@@ -1866,6 +1885,47 @@
         </div>
     </div>
 
+    <!-- CALENDAR MANAGER MODAL -->
+    <div class="modal" id="calendarManagerModal">
+        <div class="modal-content modal-sm">
+            <div class="modal-header">
+                <h2>Manage Holiday Calendars</h2>
+                <button class="modal-close" onclick="app.closeCalendarManager()">✕</button>
+            </div>
+            <div id="calendarManagerList" style="display:flex; flex-direction:column; gap:8px; max-height:240px; overflow-y:auto; margin-bottom:14px;"></div>
+            <div class="form-group">
+                <label>New Calendar Name</label>
+                <input autocomplete="off" type="text" id="newCalendarName" placeholder="e.g. UK Bank Holiday">
+            </div>
+            <div class="modal-buttons">
+                <button type="button" class="btn-modal primary" onclick="app.addCustomCalendar()">Add Calendar</button>
+                <button type="button" class="btn-modal secondary" onclick="app.closeCalendarManager()">Done</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- SUB CATEGORY RULES MODAL -->
+    <div class="modal" id="subCategoryRulesModal">
+        <div class="modal-content modal-sm">
+            <div class="modal-header">
+                <h2>Sub Category Rules</h2>
+                <button class="modal-close" onclick="app.closeSubCategoryRules()">✕</button>
+            </div>
+            <p class="cfg-hint" style="padding:0 2px;">Each sub category can ask for its own extra fields when picked on a task — e.g. "PO Advance Payment" asks for PO No and Type of Advance. Set that up here, once per sub category.</p>
+            <div id="subCategoryRulesList" style="display:flex; flex-direction:column; gap:8px; max-height:220px; overflow-y:auto; margin: 10px 0;"></div>
+            <div class="form-group">
+                <label>Sub Category Name</label>
+                <input autocomplete="off" type="text" id="scrName" placeholder="e.g. PO Advance Payment">
+            </div>
+            <div id="scrFieldRows" style="display:flex; flex-direction:column; gap:8px; margin-bottom:10px;"></div>
+            <button type="button" class="fp-action-btn" onclick="app.addScrFieldRow()">+ Add Field</button>
+            <div class="modal-buttons" style="margin-top:14px;">
+                <button type="button" class="btn-modal primary" onclick="app.saveSubCategoryRule()">Save Sub Category</button>
+                <button type="button" class="btn-modal secondary" onclick="app.resetScrForm()">Clear Form</button>
+            </div>
+        </div>
+    </div>
+
     <!-- HOLIDAY MODAL -->
     <div class="modal" id="holidayModal">
         <div class="modal-content modal-sm">
@@ -1883,7 +1943,7 @@
                     <input autocomplete="off" type="text" id="holidayName" required placeholder="e.g. Republic Day">
                 </div>
                 <div class="form-group">
-                    <label>Holiday Calendar</label>
+                    <label>Holiday Calendar <a href="#" class="edit-options-btn" onclick="app.openCalendarManager(); return false;">Manage</a></label>
                     <select id="holidayType"></select>
                 </div>
                 <div class="form-group">

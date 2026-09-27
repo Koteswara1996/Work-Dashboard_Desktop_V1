@@ -9,12 +9,18 @@ const CONFIG = {
     BASE_HOLIDAYS_KEY: 'pureEnergyHolidays',
     BASE_HOLIDAYS_TS_KEY: 'pureEnergyHolidaysUpdatedAt',
     BASE_HOLIDAY_ACK_KEY: 'pureEnergyHolidayAlertAck',
+    BASE_CUSTOM_CALENDARS_KEY: 'pureEnergyCustomCalendars',
+    BASE_LEAVE_DAYS_KEY: 'pureEnergyLeaveDays',
+    BASE_DEADLINE_ACK_KEY: 'pureEnergyDeadlineAlertAck',
     get STORAGE_KEY() { return `${this.BASE_STORAGE_KEY}_${app.currentUser}`; },
     get LISTS_KEY() { return `${this.BASE_LISTS_KEY}_${app.currentUser}`; },
     get LISTS_TS_KEY() { return `${this.BASE_LISTS_TS_KEY}_${app.currentUser}`; },
     get HOLIDAYS_KEY() { return `${this.BASE_HOLIDAYS_KEY}_${app.currentUser}`; },
     get HOLIDAYS_TS_KEY() { return `${this.BASE_HOLIDAYS_TS_KEY}_${app.currentUser}`; },
-    get HOLIDAY_ACK_KEY() { return `${this.BASE_HOLIDAY_ACK_KEY}_${app.currentUser}`; }
+    get HOLIDAY_ACK_KEY() { return `${this.BASE_HOLIDAY_ACK_KEY}_${app.currentUser}`; },
+    get CUSTOM_CALENDARS_KEY() { return `${this.BASE_CUSTOM_CALENDARS_KEY}_${app.currentUser}`; },
+    get LEAVE_DAYS_KEY() { return `${this.BASE_LEAVE_DAYS_KEY}_${app.currentUser}`; },
+    get DEADLINE_ACK_KEY() { return `${this.BASE_DEADLINE_ACK_KEY}_${app.currentUser}`; }
 };
 
 const app = {
@@ -123,6 +129,20 @@ const app = {
         let hours = 23, minutes = 59, seconds = 59;
         if (t.dueTime) {
             const parts = String(t.dueTime).split(':').map(Number);
+            hours = parts[0] || 0;
+            minutes = parts[1] || 0;
+            seconds = 0;
+        }
+        return new Date(year, month - 1, day, hours, minutes, seconds);
+    },
+
+    getTaskDeadlineDateTime(t) {
+        if (!t || !t.deadlineDate) return null;
+        const [year, month, day] = String(t.deadlineDate).split('-').map(Number);
+        if (!year || !month || !day) return null;
+        let hours = 23, minutes = 59, seconds = 59;
+        if (t.deadlineTime) {
+            const parts = String(t.deadlineTime).split(':').map(Number);
             hours = parts[0] || 0;
             minutes = parts[1] || 0;
             seconds = 0;
@@ -497,6 +517,8 @@ const app = {
         this.loadData();
         this.repairListsFromTaskData();
         this.loadHolidays();
+        this.loadCustomCalendars();
+        this.loadLeaveDays();
         this.applyTextSize();
         const reportDateEl = document.getElementById('dailyReportDate');
         if (reportDateEl && !reportDateEl.value) reportDateEl.value = this.getLocalDateStr(new Date());
@@ -1141,10 +1163,20 @@ const app = {
         const now = new Date();
         const localTodayStr = this.getLocalDateStr(now);
         const activeOverdue = [];
+        const addedIds = new Set();
+        const addOnce = (t) => { if (!addedIds.has(String(t.id))) { addedIds.add(String(t.id)); activeOverdue.push(t); } };
 
         this.tasks.forEach(t => {
-            if (t.deleted || t.status === 'Completed' || !t.dueDate) return;
+            if (t.deleted || t.status === 'Completed') return;
 
+            // Deadline crossed — independent of the regular due-date alarm,
+            // and independent of whether the task even has a due date.
+            const deadlineDateTime = this.getTaskDeadlineDateTime(t);
+            if (deadlineDateTime && now >= deadlineDateTime && t.deadlineAckDate !== localTodayStr) {
+                addOnce(t);
+            }
+
+            if (!t.dueDate) return;
             const dueDateTime = this.getTaskDueDateTime(t);
             if (!dueDateTime) return;
 
@@ -1160,7 +1192,17 @@ const app = {
 
             if (now >= dueDateTime && now >= todayAtDueTime &&
                 t.lastAckDate !== localTodayStr && now.getTime() >= snoozeUntil) {
-                activeOverdue.push(t);
+                addOnce(t);
+                return;
+            }
+
+            // Pre-day heads-up: if the due date itself falls on a holiday,
+            // Sunday, or leave day, surface it a day early so there's time
+            // to choose "do it today" or "move to the next working day"
+            // before it's overdue on a day nothing can actually be done.
+            if (this.isDateInRange(t, 'Tomorrow') && this.isNonWorkingDay(t.dueDate) &&
+                t.lastAckDate !== localTodayStr && now.getTime() >= snoozeUntil) {
+                addOnce(t);
             }
         });
 
@@ -1239,9 +1281,31 @@ const app = {
             const el = document.createElement('div');
             el.className = 'alarm-card';
             el.style = 'padding: 14px 16px; margin-bottom: 12px; border-radius: 16px; background: rgba(255, 59, 48, 0.09); border: 1px solid rgba(255, 59, 48, 0.25);';
+
+            const nonWorking = this.isNonWorkingDay(task.dueDate);
+            const deadlineDateTime = this.getTaskDeadlineDateTime(task);
+            const deadlineCrossed = deadlineDateTime && new Date() >= deadlineDateTime && task.deadlineAckDate !== this.getLocalDateStr(new Date());
+            const deadlineBanner = deadlineCrossed ? `
+                <div class="alarm-deadline" style="margin: 8px 0; padding: 8px 10px; border-radius: 10px; background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.3); font-size: 0.78rem; color: var(--red-ink);">
+                    <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap;">
+                        <span style="font-weight:700;">⏰ Deadline crossed: ${this.formatDateStr(task.deadlineDate)} at ${task.deadlineTime ? this.formatTimeStr(task.deadlineTime) : '11:59 PM'}</span>
+                        <button type="button" class="btn-row" onclick="app.acknowledgeDeadline('${idAttr}')" style="padding:5px 10px; font-size:0.74rem; font-weight:600; color:var(--label); background:var(--fill); border:1px solid var(--line); border-radius:9px; cursor:pointer;">Acknowledge</button>
+                    </div>
+                </div>` : '';
+            const nonWorkingBanner = nonWorking ? `
+                <div class="alarm-nonworking" style="margin: 8px 0; padding: 8px 10px; border-radius: 10px; background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.25); font-size: 0.78rem; color: var(--amber-ink);">
+                    <div style="font-weight:700; margin-bottom:6px;">This due date falls on a holiday, Sunday, or leave day.</div>
+                    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                        <button type="button" class="btn-row" onclick="app.resolveNonWorkingDue('${idAttr}', 'today')" style="padding:6px 12px; font-size:0.76rem; font-weight:600; color:var(--label); background:var(--fill); border:1px solid var(--line); border-radius:10px; cursor:pointer;">Do it today anyway</button>
+                        <button type="button" class="btn-row go" onclick="app.resolveNonWorkingDue('${idAttr}', 'next')" style="padding:6px 12px; font-size:0.76rem; font-weight:600; color:var(--blue-ink); background:rgba(37,99,235,0.1); border:1px solid rgba(37,99,235,0.2); border-radius:10px; cursor:pointer;">Move to next working day</button>
+                    </div>
+                </div>` : '';
+
             el.innerHTML = `
                 <div class="alarm-title" style="font-size: 0.96rem; font-weight: 700; color: var(--label);">${this.sanitize(task.description)}</div>
-                <div class="alarm-due" style="margin-top: 3px; font-size: 0.78rem; font-weight: 600; color: var(--red-ink); font-family: var(--font-num);">Due ${this.formatDateStr(task.dueDate)} at ${task.dueTime ? this.formatTimeStr(task.dueTime) : '11:59 PM'}</div>
+                <div class="alarm-due" style="margin-top: 3px; font-size: 0.78rem; font-weight: 600; color: var(--red-ink); font-family: var(--font-num);">${task.dueDate ? ('Due ' + this.formatDateStr(task.dueDate) + ' at ' + (task.dueTime ? this.formatTimeStr(task.dueTime) : '11:59 PM')) : ''}</div>
+                ${deadlineBanner}
+                ${nonWorkingBanner}
                 <div class="alarm-meta" style="display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0;">${chips.join('')}</div>
                 <div class="alarm-actions" style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
                     <button type="button" class="btn-row ok" data-action="alarm-done" data-id="${idAttr}" style="padding: 6px 12px; font-size: 0.78rem; font-weight: 600; color: var(--green-ink); background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.2); border-radius: 10px; cursor: pointer;">Mark done</button>
@@ -1282,6 +1346,16 @@ const app = {
         this.showToast('Recurrence set to ' + (task.recurrence === 'None' ? "doesn't repeat" : task.recurrence), 'success');
     },
 
+    acknowledgeDeadline(taskId) {
+        const task = this.findTask(taskId);
+        if (!task) return;
+        task.deadlineAckDate = this.getLocalDateStr(new Date());
+        task.updatedAt = Date.now();
+        this.saveData();
+        this.processEngine();
+        this.showToast('Deadline acknowledged for today.', 'success');
+    },
+
     alarmAction(action, taskId) {
         const task = this.findTask(taskId);
         if (!task) return;
@@ -1290,6 +1364,7 @@ const app = {
             this.markComplete(taskId);
         } else if (action === 'ack') {
             task.lastAckDate = this.getLocalDateStr(new Date());
+            task.deadlineAckDate = task.lastAckDate;
             task.updatedAt = Date.now();
             this.saveData(); this.renderTable();
             this.showToast("Task silenced for today.", "info");
@@ -1616,7 +1691,8 @@ const app = {
             categories: [],
             priorities: ['High', 'Medium', 'Low'],
             statuses: ['Pending', 'In-Progress', 'Completed'],
-            pendingWith: ['Self', 'Banking Team', 'Finance Manager', 'Vendor', 'Customer']
+            pendingWith: ['Self', 'Banking Team', 'Finance Manager', 'Vendor', 'Customer'],
+            subCategories: []
         };
         try {
             let stored = localStorage.getItem(CONFIG.LISTS_KEY);
@@ -1628,6 +1704,17 @@ const app = {
             this.lists = stored ? Object.assign({}, defaultLists, JSON.parse(stored)) : defaultLists;
         } catch (e) { this.lists = defaultLists; }
         this.listsUpdatedAt = Number(localStorage.getItem(CONFIG.LISTS_TS_KEY)) || 0;
+
+        // Sub Categories carry per-item rule fields ({name, fields:[...]}) —
+        // normalize any older plain-string entries (from before rules
+        // existed) into that shape so nothing crashes on old data.
+        if (Array.isArray(this.lists.subCategories)) {
+            this.lists.subCategories = this.lists.subCategories.map(sc =>
+                (typeof sc === 'string') ? { id: this.newId(), name: sc, fields: [] } : sc
+            );
+        } else {
+            this.lists.subCategories = [];
+        }
     },
 
     saveLists(bump = true) {
@@ -1707,11 +1794,185 @@ const app = {
     },
 
     holidayCalendars() {
-        // Distinct "Holiday Calendar" names in use, plus the two defaults so
-        // the picker never looks empty on a brand-new list.
+        // Distinct "Holiday Calendar" names in use, plus the two defaults and
+        // any custom ones registered up front, so a calendar can exist (and
+        // be picked) before it's ever used on an actual holiday.
         const out = ['USD Holiday', 'Indian Bank Holiday'];
+        (this.customCalendars || []).forEach(name => { if (out.indexOf(name) === -1) out.push(name); });
         this.holidays.forEach(h => { if (h.type && out.indexOf(h.type) === -1) out.push(h.type); });
         return out;
+    },
+
+    /* ---------- CUSTOM HOLIDAY CALENDARS (add/delete calendar names) ---------- */
+    /* ---------- LEAVE DAYS: mark a day (usually today) as "nothing to do".
+       Non-working for alert-deferral purposes, and deliberately never
+       logged as activity, so it doesn't show up in the daily report. ---------- */
+    loadLeaveDays() {
+        try {
+            const stored = localStorage.getItem(CONFIG.LEAVE_DAYS_KEY);
+            this.leaveDays = stored ? JSON.parse(stored) : [];
+            if (!Array.isArray(this.leaveDays)) this.leaveDays = [];
+        } catch (e) { this.leaveDays = []; }
+    },
+
+    saveLeaveDays() {
+        localStorage.setItem(CONFIG.LEAVE_DAYS_KEY, JSON.stringify(this.leaveDays));
+        this.renderLeaveDaysList();
+        if (this.currentTab === 'Dashboard') this.renderDashboard();
+    },
+
+    isTodayLeave() {
+        return this.leaveDays.indexOf(this.getLocalDateStr(new Date())) !== -1;
+    },
+
+    toggleTodayLeave() {
+        const today = this.getLocalDateStr(new Date());
+        if (this.leaveDays.indexOf(today) !== -1) {
+            this.leaveDays = this.leaveDays.filter(d => d !== today);
+            this.showToast('Leave day unmarked for today.', 'success');
+        } else {
+            this.leaveDays.push(today);
+            this.showToast('Today marked as a leave day.', 'success');
+        }
+        this.saveLeaveDays();
+    },
+
+    deleteLeaveDay(date) {
+        this.leaveDays = this.leaveDays.filter(d => d !== date);
+        this.saveLeaveDays();
+    },
+
+    renderLeaveDaysList() {
+        const box = document.getElementById('leaveDaysList');
+        const btn = document.getElementById('leaveTodayBtn');
+        if (btn) btn.textContent = this.isTodayLeave() ? 'Unmark Today\'s Leave' : 'Mark Today as Leave';
+        if (!box) return;
+        const days = this.leaveDays.slice().sort();
+        if (!days.length) {
+            box.innerHTML = '<div class="empty-state" style="padding:14px;"><span>No leave days marked.</span></div>';
+            return;
+        }
+        box.innerHTML = days.map(d => `
+            <div style="display:flex; align-items:center; gap:10px; padding:10px 12px; border-radius:10px; background:var(--input-bg); border:1px solid var(--line);">
+                <span style="flex:1; font-size:0.86rem; color:var(--label);">${this.formatDateStr(d, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}</span>
+                <button type="button" class="btn-icon bad" onclick="app.deleteLeaveDay('${this.escAttr(d)}')" title="Remove">${this.SVGS.bin}</button>
+            </div>
+        `).join('');
+    },
+
+    /* ---------- NON-WORKING DAY HELPERS (Sunday / holiday / leave day) ----------
+       Used to decide whether a task's due date needs the "do today or move
+       to next working day" choice at alert time. ---------- */
+    isNonWorkingDay(dateStr) {
+        if (!dateStr) return false;
+        const p = String(dateStr).split('-').map(Number);
+        if (p.length !== 3 || !p[0] || !p[1] || !p[2]) return false;
+        const d = new Date(p[0], p[1] - 1, p[2]);
+        if (d.getDay() === 0) return true; // Sunday
+        if (this.holidays.some(h => h.date === dateStr)) return true;
+        if (this.leaveDays.indexOf(dateStr) !== -1) return true;
+        return false;
+    },
+
+    nextWorkingDayFrom(dateStr) {
+        const p = String(dateStr).split('-').map(Number);
+        if (p.length !== 3 || !p[0] || !p[1] || !p[2]) return dateStr;
+        const d = new Date(p[0], p[1] - 1, p[2]);
+        for (let i = 0; i < 30; i++) {
+            d.setDate(d.getDate() + 1);
+            const candidate = this.getLocalDateStr(d);
+            if (!this.isNonWorkingDay(candidate)) return candidate;
+        }
+        return dateStr;
+    },
+
+    // Called from the alarm card's "Keep Today" / "Next Working Day" choice.
+    resolveNonWorkingDue(taskId, choice) {
+        const t = this.findTask(taskId);
+        if (!t) return;
+        if (choice === 'next') {
+            const newDate = this.nextWorkingDayFrom(t.dueDate);
+            t.dueDate = newDate;
+            t.lastAckDate = null;
+            t.snoozeUntil = null;
+            t.updatedAt = Date.now();
+            this.logTaskActivity(t, 'rescheduled', 'Moved off a non-working day to ' + newDate);
+            this.showToast('Moved to next working day (' + this.formatDateStr(newDate) + ').', 'success');
+        } else {
+            t.lastAckDate = this.getLocalDateStr(new Date());
+            t.updatedAt = Date.now();
+            this.showToast('Kept for today.', 'success');
+        }
+        this.saveData();
+        this.renderTable();
+        this.processEngine();
+        this.syncToGoogleSheets();
+    },
+
+    loadCustomCalendars() {
+        try {
+            const stored = localStorage.getItem(CONFIG.CUSTOM_CALENDARS_KEY);
+            this.customCalendars = stored ? JSON.parse(stored) : [];
+            if (!Array.isArray(this.customCalendars)) this.customCalendars = [];
+        } catch (e) { this.customCalendars = []; }
+    },
+
+    saveCustomCalendars() {
+        localStorage.setItem(CONFIG.CUSTOM_CALENDARS_KEY, JSON.stringify(this.customCalendars));
+    },
+
+    addCustomCalendar() {
+        const el = document.getElementById('newCalendarName');
+        const name = (el.value || '').trim();
+        if (!name) { this.showToast('Give the calendar a name.', 'warning'); return; }
+        if (this.holidayCalendars().some(c => c.toLowerCase() === name.toLowerCase())) {
+            this.showToast('That calendar already exists.', 'warning');
+            return;
+        }
+        this.customCalendars.push(name);
+        this.saveCustomCalendars();
+        el.value = '';
+        this.renderCalendarManagerList();
+        this.showToast('Calendar added.', 'success');
+    },
+
+    deleteCustomCalendar(name) {
+        const inUse = this.holidays.some(h => h.type === name);
+        if (inUse && !confirm(`"${name}" is used by existing holidays — remove it from the calendar list anyway? (those holidays keep their type, they just won't be pre-registered.)`)) return;
+        this.customCalendars = this.customCalendars.filter(c => c !== name);
+        this.saveCustomCalendars();
+        this.renderCalendarManagerList();
+        this.showToast('Calendar removed.', 'success');
+    },
+
+    openCalendarManager() {
+        this.renderCalendarManagerList();
+        document.getElementById('calendarManagerModal').classList.add('open');
+    },
+
+    closeCalendarManager() {
+        document.getElementById('calendarManagerModal').classList.remove('open');
+        // Whichever calendars remain should be reflected back in the open Holiday modal's select, if any.
+        const typeSel = document.getElementById('holidayType');
+        if (typeSel) {
+            const prev = typeSel.value;
+            typeSel.innerHTML = this.holidayCalendars().map(t => `<option value="${this.escAttr(t)}">${this.sanitize(t)}</option>`).join('');
+            if (Array.from(typeSel.options).some(o => o.value === prev)) typeSel.value = prev;
+        }
+    },
+
+    renderCalendarManagerList() {
+        const box = document.getElementById('calendarManagerList');
+        if (!box) return;
+        const builtIn = ['USD Holiday', 'Indian Bank Holiday'];
+        const all = this.holidayCalendars();
+        box.innerHTML = all.map(name => {
+            const isBuiltIn = builtIn.indexOf(name) !== -1;
+            return `<div style="display:flex; align-items:center; gap:10px; padding:10px 12px; border-radius:10px; background:var(--input-bg); border:1px solid var(--line);">
+                <span style="flex:1; font-size:0.86rem; color:var(--label);">${this.sanitize(name)}${isBuiltIn ? ' <span style=\"color:var(--label-2); font-weight:400;\">(built-in)</span>' : ''}</span>
+                ${isBuiltIn ? '' : `<button type="button" class="btn-icon bad" onclick="app.deleteCustomCalendar('${this.escAttr(name)}')" title="Delete">${this.SVGS.bin}</button>`}
+            </div>`;
+        }).join('');
     },
 
     // Skips weekends and any other holidays already on file, so the
@@ -2459,6 +2720,7 @@ const app = {
         keepSelect('taskPriority', this.lists.priorities.map(opt).join(''));
         keepSelect('taskStatus', this.lists.statuses.map(opt).join(''));
         keepSelect('taskPendingWith', '<option value="">Select Person</option>' + this.lists.pendingWith.map(opt).join(''));
+        keepSelect('taskSubCategory', '<option value="">Select Sub Category</option>' + (this.lists.subCategories || []).map(sc => opt(sc.name)).join(''));
 
         const union = (base, field) => {
             const out = [].concat(base);
@@ -2549,7 +2811,7 @@ const app = {
         if (btn) btn.classList.add('active');
         document.getElementById('screenTitle').textContent = titles[tab] || tab;
 
-        if (tab === 'Config') { this.loadReportSamples(); this.loadFixedTasks(); this.enterCfgTab(); }
+        if (tab === 'Config') { this.loadReportSamples(); this.loadFixedTasks(); this.renderLeaveDaysList(); this.enterCfgTab(); }
 
         this.renderTable();
     },
@@ -2810,7 +3072,8 @@ const app = {
             const matchSearch = !search ||
                 (t.description || '').toLowerCase().includes(search) ||
                 (t.mailChain || '').toLowerCase().includes(search) ||
-                (t.notes || '').toLowerCase().includes(search);
+                (t.notes || '').toLowerCase().includes(search) ||
+                (t.subCategory || '').toLowerCase().includes(search);
             const matchDue = dueMode.value === 'NoDue' ? !t.dueDate : (dueMode.value !== 'All' ? this.isDateInRange(t, dueMode.value) : true);
             const matchCat = catVals.includes('All') || catVals.includes(t.category);
             const matchPri = priVals.includes('All') || priVals.includes(t.priority);
@@ -3105,6 +3368,8 @@ const app = {
             this.setSelectValue('taskPendingWith', t.pendingWith || '');
             document.getElementById('taskDueDate').value = t.dueDate || '';
             document.getElementById('taskDueTime').value = t.dueTime || '';
+            document.getElementById('taskDeadlineDate').value = t.deadlineDate || '';
+            document.getElementById('taskDeadlineTime').value = t.deadlineTime || '';
             document.getElementById('taskMailChain').value = t.mailChain || '';
             document.getElementById('taskRecurrence').value = t.recurrence || 'None';
             document.getElementById('taskNotes').value = t.notes || '';
@@ -3125,6 +3390,8 @@ const app = {
         }
 
         this.renderPaymentDetails(hasId ? (this.findTask(id) || {}).paymentDetails : {});
+        this.setSelectValue('taskSubCategory', hasId ? (this.findTask(id) || {}).subCategory : '');
+        this.renderSubCategoryFields(hasId ? (this.findTask(id) || {}).subCategoryFields : {});
         if (mailBtn) mailBtn.style.display = this.storedEmailId ? '' : 'none';
         this.checkDueHoliday();
         this.checkSlotAvailability();
@@ -3190,6 +3457,10 @@ const app = {
         return /import/i.test(cat || '') && /payment/i.test(cat || '');
     },
 
+    isUrgentPaymentCategory(cat) {
+        return /urgent/i.test(cat || '') && /payment/i.test(cat || '');
+    },
+
     updateConditionalFields() {
         const cat = document.getElementById('taskCategory').value;
         const status = document.getElementById('taskStatus').value;
@@ -3197,12 +3468,36 @@ const app = {
 
         const domesticBox = document.getElementById('domesticCompletedFields');
         const importBox = document.getElementById('importInProgressFields');
+        const subCategoryBox = document.getElementById('subCategoryField');
 
         const showDomestic = this.isDomesticPaymentCategory(cat) && statusNorm === 'completed';
         const showImport = this.isImportPaymentCategory(cat) && statusNorm === 'in progress';
+        // Sub Category isn't tied to status — it's shown for Domestic Payments
+        // or Urgent Payments regardless of what status the entry is in.
+        const showSubCategory = this.isDomesticPaymentCategory(cat) || this.isUrgentPaymentCategory(cat);
 
         if (domesticBox) domesticBox.style.display = showDomestic ? '' : 'none';
         if (importBox) importBox.style.display = showImport ? '' : 'none';
+        if (subCategoryBox) subCategoryBox.style.display = showSubCategory ? '' : 'none';
+
+        // A hidden condition's old values must not silently ride along on
+        // save just because the category/status changed after they were
+        // filled in — clear whatever no longer applies.
+        if (!showDomestic) {
+            document.getElementById('pdPoNumber').value = '';
+            document.getElementById('pdInvoiceNumbers').value = '';
+            document.getElementById('pdNarration').value = '';
+        }
+        if (!showImport) {
+            document.getElementById('pdPaymentPercent').value = '';
+            this.setSelectValue('pdPaymentType', '');
+            this.setSelectValue('pdPaymentAgainst', '');
+        }
+        if (!showSubCategory) {
+            this.setSelectValue('taskSubCategory', '');
+            const ruleBox = document.getElementById('subCategoryRuleFields');
+            if (ruleBox) ruleBox.innerHTML = '';
+        }
     },
 
     renderPaymentDetails(pd) {
@@ -3225,6 +3520,148 @@ const app = {
             paymentType: document.getElementById('pdPaymentType').value,
             paymentAgainst: document.getElementById('pdPaymentAgainst').value
         };
+    },
+
+    /* ---------- SUB CATEGORY RULES: each sub category can define its own
+       extra fields (e.g. "PO Advance Payment" → PO No + Type of Advance),
+       set up once when the sub category itself is created/edited. ---------- */
+    openSubCategoryRules() {
+        this.editingScrId = null;
+        this.resetScrForm();
+        this.renderSubCategoryRulesList();
+        document.getElementById('subCategoryRulesModal').classList.add('open');
+    },
+
+    closeSubCategoryRules() {
+        document.getElementById('subCategoryRulesModal').classList.remove('open');
+    },
+
+    resetScrForm() {
+        this.editingScrId = null;
+        document.getElementById('scrName').value = '';
+        document.getElementById('scrFieldRows').innerHTML = '';
+    },
+
+    addScrFieldRow(label = '', options = []) {
+        const box = document.getElementById('scrFieldRows');
+        if (!box) return;
+        const row = document.createElement('div');
+        row.className = 'keypoint-row scr-field-row';
+        row.innerHTML = `
+            <input type="text" class="kp-key scr-field-label" placeholder="Field label (e.g. PO No)" value="${this.escAttr(label)}">
+            <input type="text" class="kp-value scr-field-options" placeholder="Options, comma separated (blank = plain text)" value="${this.escAttr((options || []).join(', '))}">
+            <button type="button" class="btn-icon bad" onclick="this.closest('.scr-field-row').remove()" title="Remove">${this.SVGS.bin}</button>
+        `;
+        box.appendChild(row);
+    },
+
+    renderSubCategoryRulesList() {
+        const box = document.getElementById('subCategoryRulesList');
+        if (!box) return;
+        const items = this.lists.subCategories || [];
+        if (!items.length) {
+            box.innerHTML = '<div class="empty-state" style="padding:14px;"><span>No sub categories yet — add one below.</span></div>';
+            return;
+        }
+        box.innerHTML = items.map(sc => {
+            const summary = (sc.fields || []).map(f => f.label).join(', ') || 'No extra fields';
+            return `<div style="display:flex; align-items:center; gap:10px; padding:10px 12px; border-radius:10px; background:var(--input-bg); border:1px solid var(--line);">
+                <div style="flex:1; min-width:0;">
+                    <div style="font-weight:700; font-size:0.88rem; color:var(--label);">${this.sanitize(sc.name)}</div>
+                    <div style="font-size:0.76rem; color:var(--label-2);">${this.sanitize(summary)}</div>
+                </div>
+                <button type="button" class="btn-icon" onclick="app.editSubCategoryRule('${this.escAttr(sc.id)}')" title="Edit">${this.SVGS.edit}</button>
+                <button type="button" class="btn-icon bad" onclick="app.deleteSubCategoryRule('${this.escAttr(sc.id)}')" title="Delete">${this.SVGS.bin}</button>
+            </div>`;
+        }).join('');
+    },
+
+    editSubCategoryRule(id) {
+        const sc = (this.lists.subCategories || []).find(x => String(x.id) === String(id));
+        if (!sc) return;
+        this.editingScrId = sc.id;
+        document.getElementById('scrName').value = sc.name;
+        document.getElementById('scrFieldRows').innerHTML = '';
+        (sc.fields || []).forEach(f => this.addScrFieldRow(f.label, f.options || []));
+    },
+
+    collectScrFields() {
+        return Array.from(document.querySelectorAll('#scrFieldRows .scr-field-row')).map(row => {
+            const label = row.querySelector('.scr-field-label').value.trim();
+            const optsRaw = row.querySelector('.scr-field-options').value.trim();
+            const options = optsRaw ? optsRaw.split(',').map(s => s.trim()).filter(Boolean) : [];
+            return { label, options };
+        }).filter(f => f.label);
+    },
+
+    saveSubCategoryRule() {
+        const name = document.getElementById('scrName').value.trim();
+        if (!name) { this.showToast('Give the sub category a name.', 'warning'); return; }
+        const fields = this.collectScrFields();
+        if (!Array.isArray(this.lists.subCategories)) this.lists.subCategories = [];
+
+        if (this.editingScrId) {
+            const sc = this.lists.subCategories.find(x => String(x.id) === String(this.editingScrId));
+            if (sc) { sc.name = name; sc.fields = fields; }
+        } else {
+            if (this.lists.subCategories.some(x => x.name.toLowerCase() === name.toLowerCase())) {
+                this.showToast('A sub category with that name already exists.', 'warning');
+                return;
+            }
+            this.lists.subCategories.push({ id: this.newId(), name, fields });
+        }
+
+        this.saveLists();
+        this.resetScrForm();
+        this.renderSubCategoryRulesList();
+        this.showToast('Sub category saved.', 'success');
+    },
+
+    deleteSubCategoryRule(id) {
+        if (!confirm('Delete this sub category and its rule fields?')) return;
+        this.lists.subCategories = (this.lists.subCategories || []).filter(x => String(x.id) !== String(id));
+        this.saveLists();
+        this.renderSubCategoryRulesList();
+        this.showToast('Sub category removed.', 'success');
+    },
+
+    // Task-modal side: shows whatever extra fields the CURRENTLY selected
+    // sub category defines, prefilled from an existing task if editing.
+    renderSubCategoryFields(prefill) {
+        const name = document.getElementById('taskSubCategory').value;
+        const box = document.getElementById('subCategoryRuleFields');
+        if (!box) return;
+        box.innerHTML = '';
+        const sc = (this.lists.subCategories || []).find(x => x.name === name);
+        if (!sc || !sc.fields || !sc.fields.length) return;
+
+        const values = prefill || {};
+        sc.fields.forEach(f => {
+            const val = values[f.label] || '';
+            const row = document.createElement('div');
+            row.className = 'form-group scr-value-row';
+            if (f.options && f.options.length) {
+                row.innerHTML = `<label>${this.sanitize(f.label)}</label>
+                    <select class="scr-value-input" data-label="${this.escAttr(f.label)}">
+                        <option value="">Select</option>
+                        ${f.options.map(o => `<option value="${this.escAttr(o)}" ${o === val ? 'selected' : ''}>${this.sanitize(o)}</option>`).join('')}
+                    </select>`;
+            } else {
+                row.innerHTML = `<label>${this.sanitize(f.label)}</label>
+                    <input type="text" class="scr-value-input" data-label="${this.escAttr(f.label)}" value="${this.escAttr(val)}">`;
+            }
+            box.appendChild(row);
+        });
+    },
+
+    collectSubCategoryFields() {
+        const box = document.getElementById('subCategoryRuleFields');
+        if (!box) return {};
+        const out = {};
+        box.querySelectorAll('.scr-value-input').forEach(el => {
+            if (el.value) out[el.dataset.label] = el.value;
+        });
+        return out;
     },
 
     // Returns an error message if a required conditional field is missing
@@ -3254,16 +3691,20 @@ const app = {
         const fields = {
             description: desc,
             category: document.getElementById('taskCategory').value,
+            subCategory: document.getElementById('taskSubCategory') ? document.getElementById('taskSubCategory').value : '',
             priority: document.getElementById('taskPriority').value,
             status: document.getElementById('taskStatus').value || 'Pending',
             pendingWith: document.getElementById('taskPendingWith').value,
             dueDate: document.getElementById('taskDueDate').value,
             dueTime: document.getElementById('taskDueTime').value,
+            deadlineDate: document.getElementById('taskDeadlineDate').value,
+            deadlineTime: document.getElementById('taskDeadlineTime').value,
             mailChain: document.getElementById('taskMailChain').value.trim(),
             recurrence: document.getElementById('taskRecurrence').value || 'None',
             notes: document.getElementById('taskNotes').value,
             keyPoints: this.collectKeyPoints(),
             paymentDetails: this.collectPaymentDetails(),
+            subCategoryFields: this.collectSubCategoryFields(),
             updatedAt: Date.now()
         };
 
@@ -3290,9 +3731,11 @@ const app = {
             if (!task) { this.showToast('That entry is no longer available.', 'error'); this.closeTaskModal(); return; }
 
             const dueChanged = (task.dueDate || '') !== fields.dueDate || (task.dueTime || '') !== fields.dueTime;
+            const deadlineChanged = (task.deadlineDate || '') !== fields.deadlineDate || (task.deadlineTime || '') !== fields.deadlineTime;
             const statusChanged = task.status !== fields.status;
             Object.assign(task, fields);
             if (dueChanged) { task.lastAckDate = null; task.snoozeUntil = null; }
+            if (deadlineChanged) { task.deadlineAckDate = null; }
             if (this.storedEmailId) task.emailId = this.storedEmailId;
 
             if (task.status === 'Completed') {
@@ -3303,6 +3746,7 @@ const app = {
 
             const changeNotes = [];
             if (dueChanged) changeNotes.push('due date/time changed');
+            if (deadlineChanged) changeNotes.push('deadline changed');
             if (statusChanged) changeNotes.push('status → ' + fields.status);
             this.logTaskActivity(task, 'edited', changeNotes.join('; '));
         } else {
@@ -3314,6 +3758,7 @@ const app = {
                 completedDate: null,
                 lastAckDate: null,
                 snoozeUntil: null,
+                deadlineAckDate: null,
                 emailId: this.storedEmailId || null
             }, fields);
             if (task.status === 'Completed') task.completedDate = todayStr;
@@ -3699,6 +4144,11 @@ const app = {
                 empty: 'Nothing open to break down.'
             }),
             this.dashSection({
+                title: 'By Sub Category', ftype: 'subCategory', total: open.filter(t => t.subCategory).length,
+                rows: this.dashGroup(open.filter(t => t.subCategory), 'subCategory', 'No sub category'),
+                empty: 'No sub categories in use yet.'
+            }),
+            this.dashSection({
                 title: 'By Status', ftype: 'status', total: total,
                 rows: this.dashGroup(open, 'status', 'No status', this.lists.statuses),
                 colourFor: (name) => this.dashStatusColour(name),
@@ -3759,6 +4209,13 @@ const app = {
             const search = document.getElementById('searchHolidays');
             if (search) { search.value = fvalue; this.renderHolidays(); }
             this.showToast('Holiday: ' + fvalue, 'info');
+            return;
+        } else if (ftype === 'subCategory') {
+            this.clearFilters(true);
+            const searchEl = document.getElementById('searchInput');
+            if (searchEl) searchEl.value = fvalue;
+            this.switchTab('Register');
+            this.showToast('Sub Category: ' + fvalue, 'info');
             return;
         }
 
