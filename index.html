@@ -398,11 +398,19 @@
         .toolbar-filters { display: flex; align-items: center; gap: 8px; flex: 1 1 auto; }
         .toolbar-actions { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; margin-left: auto; }
 
-        /* ── COMPACT TOOLBAR (search + gear, no dedicated filter row) ── */
+        /* ── COMPACT TOOLBAR (search + gear, no dedicated filter row) ──
+           Search bar, the filter (gear) icon and every other icon button
+           always sit on one line: the search box is the only part allowed
+           to shrink (it has min-width:0 to give up space), every button
+           keeps its full size (flex-shrink:0) instead of getting squeezed
+           out of view. Note: this row can't scroll horizontally — the
+           filter panel it opens is positioned absolutely relative to it,
+           and would get clipped by an overflow:auto ancestor. ── */
         .compact-toolbar {
             display: flex; align-items: center; gap: 8px; flex-wrap: nowrap;
             padding: 12px var(--gutter, 16px); position: relative;
         }
+        .compact-toolbar > .btn-icon, .compact-toolbar > .btn-new-entry { flex: 0 0 auto; }
         .toolbar-search-wrap { position: relative; flex: 1 1 auto; min-width: 0; }
         .toolbar-search-wrap .search-compact { width: 100%; flex: 1 1 auto; min-width: 0; padding-right: 34px; }
         .search-cancel-btn {
@@ -2004,6 +2012,10 @@
                 <input autocomplete="off" type="text" id="newListOptionInput" placeholder="Add new option">
                 <button type="button" onclick="app.addListOption()" class="btn-modal primary">Add</button>
             </div>
+            <label id="newCategorySubCategoryOption" style="display:none; align-items:center; gap:8px; font-size:0.82rem; color:var(--label-2); margin-top:8px; cursor:pointer;">
+                <input type="checkbox" id="newCategoryHasSubCategory" style="width:auto;">
+                This category needs a Sub Category (shown when an entry in it is marked Completed)
+            </label>
             <div class="lm-foot">
                 <button type="button" onclick="app.clearList()" class="btn-modal danger">Clear This List</button>
                 <button type="button" onclick="app.closeListManager()" class="btn-modal secondary">Done</button>
