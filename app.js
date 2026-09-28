@@ -243,9 +243,13 @@ const app = {
     },
 
     /* ---------- ACTIVITY LOG (fire-and-forget: never blocks or fails the
-       actual task action if the cloud URL is unset or the request fails) ---------- */
+       actual task action if the cloud URL is unset or the request fails).
+       Only "completed" is logged — the Daily Activity Report is built from
+       this feed, and it should only ever list tasks that were actually
+       finished today, not every edit/reschedule/reopen/bin touch. ---------- */
     logTaskActivity(task, action, details) {
         if (!task || !this.currentUser) return;
+        if (action !== 'completed') return;
         if ((localStorage.getItem(CONFIG.SYNC_URL_KEY) || "").trim() === "") return;
         this.cloudRequest({
             action: 'logActivity',
@@ -581,7 +585,7 @@ const app = {
 
         switch (action) {
             case 'edit': this.openTaskModal(id); break;
-            case 'done': this.markComplete(id); break;
+            case 'done': this.tryCompleteTask(id); break;
             case 'reopen': this.reopenTask(id); break;
             case 'bin': this.softDelete(id); break;
             case 'restore': this.restoreTask(id); break;
@@ -1361,6 +1365,10 @@ const app = {
         if (!task) return;
 
         if (action === 'done') {
+            if (!this.subCategoryComplete(task)) {
+                this.tryCompleteTask(taskId);
+                return;
+            }
             this.markComplete(taskId);
         } else if (action === 'ack') {
             task.lastAckDate = this.getLocalDateStr(new Date());
@@ -1692,8 +1700,12 @@ const app = {
             priorities: ['High', 'Medium', 'Low'],
             statuses: ['Pending', 'In-Progress', 'Completed'],
             pendingWith: ['Self', 'Banking Team', 'Finance Manager', 'Vendor', 'Customer'],
-            subCategories: []
+            subCategories: [],
+            // Categories that were opted into having a Sub Category at the
+            // time they were created/edited (see categoryHasSubCategory).
+            subCategoryCategories: []
         };
+        let parsedStored = null;
         try {
             let stored = localStorage.getItem(CONFIG.LISTS_KEY);
             if (!stored) {
@@ -1701,9 +1713,27 @@ const app = {
                 const migratedTo = localStorage.getItem(CONFIG.LEGACY_MIGRATED_KEY);
                 if (legacy && (!migratedTo || migratedTo === this.currentUser)) stored = legacy;
             }
-            this.lists = stored ? Object.assign({}, defaultLists, JSON.parse(stored)) : defaultLists;
+            parsedStored = stored ? JSON.parse(stored) : null;
+            this.lists = parsedStored ? Object.assign({}, defaultLists, parsedStored) : defaultLists;
         } catch (e) { this.lists = defaultLists; }
         this.listsUpdatedAt = Number(localStorage.getItem(CONFIG.LISTS_TS_KEY)) || 0;
+
+        if (!Array.isArray(this.lists.subCategoryCategories)) this.lists.subCategoryCategories = [];
+        // One-time default: if this profile never explicitly set which
+        // categories carry a Sub Category, seed it from the categories that
+        // already look like Duty Payment / Demand Draft / Import Payments /
+        // Domestic Payment / Urgent Payment. Never runs again once a value
+        // (even an empty one) has been saved, so it won't fight the user's
+        // own choices made from the category editor.
+        if (!parsedStored || !Array.isArray(parsedStored.subCategoryCategories)) {
+            (this.lists.categories || []).forEach(c => {
+                const looksLikeSubCategoryCategory = /duty/i.test(c) || /demand\s*draft/i.test(c) ||
+                    this.isDomesticPaymentCategory(c) || this.isUrgentPaymentCategory(c) || this.isImportPaymentCategory(c);
+                if (looksLikeSubCategoryCategory && this.lists.subCategoryCategories.indexOf(c) === -1) {
+                    this.lists.subCategoryCategories.push(c);
+                }
+            });
+        }
 
         // Sub Categories carry per-item rule fields ({name, fields:[...]}) —
         // normalize any older plain-string entries (from before rules
@@ -2174,6 +2204,7 @@ const app = {
         const titles = { categories: "Categories", priorities: "Priorities", statuses: "Status Options", pendingWith: "Pending With" };
         document.getElementById('listManagerTitle').textContent = `Manage ${titles[key]}`;
         this.renderListManagerItems();
+        this.updateNewCategorySubCategoryOption();
         document.getElementById('listManagerModal').classList.add('open');
     },
 
@@ -2182,6 +2213,18 @@ const app = {
         const titles = { categories: "Categories", priorities: "Priorities", statuses: "Status Options", pendingWith: "Pending With" };
         document.getElementById('listManagerTitle').textContent = `Manage ${titles[this.editingListKey]}`;
         this.renderListManagerItems();
+        this.updateNewCategorySubCategoryOption();
+    },
+
+    // Only Categories get the "needs a Sub Category" checkbox — it's the
+    // one place that option is adopted, at category-creation time.
+    updateNewCategorySubCategoryOption() {
+        const wrap = document.getElementById('newCategorySubCategoryOption');
+        if (!wrap) return;
+        const isCategories = this.editingListKey === 'categories';
+        wrap.style.display = isCategories ? 'flex' : 'none';
+        const cb = document.getElementById('newCategoryHasSubCategory');
+        if (cb) cb.checked = false;
     },
 
     closeListManager() {
@@ -2192,9 +2235,26 @@ const app = {
     renderListManagerItems() {
         const container = document.getElementById('listManagerItems');
         container.innerHTML = '';
+        const isCategories = this.editingListKey === 'categories';
         (this.lists[this.editingListKey] || []).forEach((item, index) => {
-            container.innerHTML += `<div class="lm-item"><span class="lm-name">${this.sanitize(item)}</span><button type="button" class="lm-del" data-action="list-delete" data-index="${index}">Delete</button></div>`;
+            const subCatToggle = isCategories
+                ? `<label class="lm-subcat-toggle" style="display:flex; align-items:center; gap:5px; font-size:0.72rem; color:var(--label-2); cursor:pointer; white-space:nowrap;" title="Show a Sub Category when an entry in this category is marked Completed">
+                        <input type="checkbox" style="width:auto;" ${this.categoryHasSubCategory(item) ? 'checked' : ''} onchange="app.toggleCategorySubCategory(${index}, this.checked)">Sub Category
+                   </label>`
+                : '';
+            container.innerHTML += `<div class="lm-item"><span class="lm-name">${this.sanitize(item)}</span>${subCatToggle}<button type="button" class="lm-del" data-action="list-delete" data-index="${index}">Delete</button></div>`;
         });
+    },
+
+    // Toggles whether a category has adopted the Sub Category option.
+    toggleCategorySubCategory(index, on) {
+        const name = this.lists.categories[index];
+        if (!name) return;
+        if (!Array.isArray(this.lists.subCategoryCategories)) this.lists.subCategoryCategories = [];
+        const at = this.lists.subCategoryCategories.indexOf(name);
+        if (on && at === -1) this.lists.subCategoryCategories.push(name);
+        else if (!on && at !== -1) this.lists.subCategoryCategories.splice(at, 1);
+        this.saveLists();
     },
 
     addListOption() {
@@ -2202,6 +2262,14 @@ const app = {
         const val = input.value.trim();
         if (val && !this.lists[this.editingListKey].includes(val)) {
             this.lists[this.editingListKey].push(val);
+            if (this.editingListKey === 'categories') {
+                const cb = document.getElementById('newCategoryHasSubCategory');
+                if (cb && cb.checked) {
+                    if (!Array.isArray(this.lists.subCategoryCategories)) this.lists.subCategoryCategories = [];
+                    this.lists.subCategoryCategories.push(val);
+                    cb.checked = false;
+                }
+            }
             this.saveLists();
             this.renderListManagerItems();
             input.value = '';
@@ -2239,6 +2307,9 @@ const app = {
         if (inUse > 0 && !confirm(`"${removed}" is used by ${inUse} entries. Delete anyway?`)) return;
 
         this.lists[this.editingListKey].splice(index, 1);
+        if (this.editingListKey === 'categories' && Array.isArray(this.lists.subCategoryCategories)) {
+            this.lists.subCategoryCategories = this.lists.subCategoryCategories.filter(c => c !== removed);
+        }
         this.saveLists();
         this.renderListManagerItems();
     },
@@ -3461,6 +3532,25 @@ const app = {
         return /urgent/i.test(cat || '') && /payment/i.test(cat || '');
     },
 
+    // Whether a category was opted into showing a Sub Category — decided at
+    // category-creation time in the category editor (Manage Categories),
+    // not guessed from the category name.
+    categoryHasSubCategory(cat) {
+        if (!cat) return false;
+        return (this.lists.subCategoryCategories || []).indexOf(cat) !== -1;
+    },
+
+    // True once a task's Sub Category (and every field its rule requires)
+    // has actually been filled in — or the category doesn't need one at all.
+    subCategoryComplete(t) {
+        if (!t || !this.categoryHasSubCategory(t.category)) return true;
+        if (!t.subCategory) return false;
+        const sc = (this.lists.subCategories || []).find(x => x.name === t.subCategory);
+        if (!sc || !sc.fields || !sc.fields.length) return true;
+        const vals = t.subCategoryFields || {};
+        return sc.fields.every(f => (vals[f.label] || '').toString().trim() !== '');
+    },
+
     updateConditionalFields() {
         const cat = document.getElementById('taskCategory').value;
         const status = document.getElementById('taskStatus').value;
@@ -3472,9 +3562,10 @@ const app = {
 
         const showDomestic = this.isDomesticPaymentCategory(cat) && statusNorm === 'completed';
         const showImport = this.isImportPaymentCategory(cat) && statusNorm === 'in progress';
-        // Sub Category isn't tied to status — it's shown for Domestic Payments
-        // or Urgent Payments regardless of what status the entry is in.
-        const showSubCategory = this.isDomesticPaymentCategory(cat) || this.isUrgentPaymentCategory(cat);
+        // A category's Sub Category only needs filling in once the entry is
+        // actually being marked Completed / Done — not while it's still
+        // open — so it stays out of the way until it's actually required.
+        const showSubCategory = this.categoryHasSubCategory(cat) && statusNorm === 'completed';
 
         if (domesticBox) domesticBox.style.display = showDomestic ? '' : 'none';
         if (importBox) importBox.style.display = showImport ? '' : 'none';
@@ -3679,6 +3770,14 @@ const app = {
                 return 'Import Payment marked In Progress needs Payment %, Payment Type, and Payment Against.';
             }
         }
+        if (this.categoryHasSubCategory(fields.category) && String(fields.status).trim().toLowerCase() === 'completed') {
+            if (!fields.subCategory) return 'Select a Sub Category before marking this Completed.';
+            const sc = (this.lists.subCategories || []).find(x => x.name === fields.subCategory);
+            if (sc && sc.fields && sc.fields.length) {
+                const missing = sc.fields.filter(f => !((fields.subCategoryFields || {})[f.label] || '').toString().trim());
+                if (missing.length) return 'Fill in ' + missing.map(f => f.label).join(', ') + ' before marking this Completed.';
+            }
+        }
         return '';
     },
 
@@ -3816,6 +3915,32 @@ const app = {
             snoozeUntil: null,
             updatedAt: Date.now()
         });
+    },
+
+    // Entry point for every "quick done" gesture (table button, swipe, drag,
+    // the alarm popup's Mark done). If the category needs a Sub Category,
+    // its fields must be filled in first: open the entry so they can be
+    // entered, instead of silently marking it done without them.
+    tryCompleteTask(id) {
+        const t = this.findTask(id);
+        if (!t) return;
+        if (!this.subCategoryComplete(t)) {
+            // Silence any active overdue alert for today so it doesn't pop
+            // back up while the required fields are being filled in.
+            t.lastAckDate = this.getLocalDateStr(new Date());
+            t.updatedAt = Date.now();
+            this.saveData();
+            if (this.isAlarming) this.stopPersistentAlarm(false);
+
+            this.openTaskModal(id);
+            this.setSelectValue('taskStatus', 'Completed');
+            this.updateConditionalFields();
+            this.setSelectValue('taskSubCategory', t.subCategory || '');
+            this.renderSubCategoryFields(t.subCategoryFields || {});
+            this.showToast('Select a Sub Category and fill in its details, then save to mark this done.', 'warning');
+            return;
+        }
+        this.markComplete(id);
     },
 
     markComplete(id) {
@@ -4101,12 +4226,15 @@ const app = {
             this.dashTile({
                 title: 'Due Today', count: dueToday.length, colour: 'var(--blue)',
                 ftype: 'due', fvalue: 'Today',
-                sub: dueToday.length ? 'On the clock' : 'Nothing due'
+                sub: dueToday.length ? 'On the clock' : 'Nothing to do Today'
             }),
             this.dashTile({
                 title: 'Overdue', count: overdue.length, colour: 'var(--red)',
                 ftype: 'due', fvalue: 'Overdue',
-                sub: overdue.length ? 'Needs attention' : 'All clear'
+                // No overdue entries: say so plainly. This is a display-only
+                // state — it's never written to a task and never logged as
+                // activity, so it can't show up in the Daily Activity Report.
+                sub: overdue.length ? 'Needs attention' : 'Nothing to do Today'
             }),
             this.dashTile({
                 title: 'Next 7 Days', count: next7.length, colour: 'var(--amber)',
@@ -4336,7 +4464,7 @@ const app = {
             el.classList.remove('swipe-done', 'swipe-bin');
             if (!wasX) return;
 
-            if (moved > 95) this.markComplete(el.dataset.recordId);
+            if (moved > 95) this.tryCompleteTask(el.dataset.recordId);
             else if (moved < -95) this.softDelete(el.dataset.recordId);
         };
         document.addEventListener('touchend', release, { passive: true });
@@ -4589,18 +4717,24 @@ const app = {
         const pending = this.lists.statuses.indexOf('Pending') !== -1 ? 'Pending' : (this.lists.statuses[0] || 'Pending');
         const spawned = [];
         let n = 0;
+        let needsSubCategory = 0;
 
         ids.forEach(id => {
             const t = this.findTask(id);
             if (!t) return;
 
             if (kind === 'done') {
+                // Can't fill in a Sub Category's required fields from a bulk
+                // action — leave those entries open and point the user at
+                // them individually instead of completing them half-filled.
+                if (!this.subCategoryComplete(t)) { needsSubCategory++; return; }
                 t.status = 'Completed';
                 t.completedDate = todayStr;
                 t.lastAckDate = null; t.snoozeUntil = null;
                 t.updatedAt = Date.now();
                 const repeat = this.nextOccurrence(t);
                 if (repeat) { if (!t.seriesId) t.seriesId = repeat.seriesId; spawned.push(repeat); }
+                this.logTaskActivity(t, 'completed', '');
             } else if (kind === 'reopen') {
                 t.status = pending;
                 t.completedDate = null; t.lastAckDate = null; t.snoozeUntil = null;
@@ -4627,7 +4761,11 @@ const app = {
         this.processEngine();
 
         const verb = { done: 'completed', reopen: 'reopened', bin: 'moved to the Bin', restore: 'restored' }[kind];
-        this.showToast(n + ' ' + (n === 1 ? 'entry' : 'entries') + ' ' + verb + '.', 'success');
+        let msg = n + ' ' + (n === 1 ? 'entry' : 'entries') + ' ' + verb + '.';
+        if (needsSubCategory > 0) {
+            msg += ' ' + needsSubCategory + ' skipped — open ' + (needsSubCategory === 1 ? 'it' : 'them') + ' individually to fill in the Sub Category first.';
+        }
+        this.showToast(msg, needsSubCategory > 0 ? 'warning' : 'success');
         this.syncToGoogleSheets();
     },
 
