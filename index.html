@@ -1860,7 +1860,7 @@
                 <div class="form-row">
                     <div class="form-group">
                         <label>Mail Chain / Reference</label>
-                        <input autocomplete="off" type="text" id="taskMailChain" placeholder="e.g. Ticket #12345">
+                        <input autocomplete="off" type="text" id="taskMailChain" placeholder="e.g. Ticket #12345" oninput="app.updateNarrationPreview()">
                     </div>
                     <div class="form-group">
                         <label>Recurrence</label>
@@ -1870,6 +1870,29 @@
                             <option value="Weekly">Weekly</option>
                             <option value="Monthly">Monthly</option>
                         </select>
+                    </div>
+                </div>
+                <div class="form-group" id="tallyNarrationBox" style="display:none;">
+                    <label>Tally Narration <a href="#" class="edit-options-btn" onclick="app.openNarrationRules(); return false;">Manage types</a></label>
+                    <select id="taskNarrationType" onchange="app.onNarrationTypeChange()"><option value="">— Not a payment / skip —</option></select>
+                    <div id="narrationFieldsWrap" style="display:none; margin-top:10px;">
+                        <div class="form-group" id="narrationPercentGroup" style="display:none;">
+                            <label>%</label>
+                            <input autocomplete="off" type="number" min="0" max="100" id="narrationPercent" placeholder="e.g. 100" oninput="app.updateNarrationPreview()">
+                        </div>
+                        <div class="form-group">
+                            <label id="narrationDocLabel">Document No</label>
+                            <input autocomplete="off" type="text" id="narrationDocNo" placeholder="e.g. INPO/PP/26-27/0156" oninput="app.updateNarrationPreview()">
+                        </div>
+                        <div class="form-group">
+                            <label>Purpose / Note <span style="font-weight:400; text-transform:none; letter-spacing:0;">(optional)</span></label>
+                            <input autocomplete="off" type="text" id="narrationPurpose" placeholder="e.g. After TDS of 10%" oninput="app.updateNarrationPreview()">
+                        </div>
+                        <div class="form-group" style="margin-bottom:0;">
+                            <label>Generated Narration</label>
+                            <textarea id="narrationPreview" readonly style="min-height:70px;"></textarea>
+                            <button type="button" class="btn-modal secondary" style="margin-top:8px;" onclick="app.copyToClipboard(document.getElementById('narrationPreview').value)">Copy Narration</button>
+                        </div>
                     </div>
                 </div>
                 <div class="form-group">
@@ -1930,6 +1953,37 @@
             <div class="modal-buttons" style="margin-top:14px;">
                 <button type="button" class="btn-modal primary" onclick="app.saveSubCategoryRule()">Save Sub Category</button>
                 <button type="button" class="btn-modal secondary" onclick="app.resetScrForm()">Clear Form</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- TALLY NARRATION TYPES MODAL -->
+    <div class="modal" id="narrationRulesModal">
+        <div class="modal-content modal-sm">
+            <div class="modal-header">
+                <h2>Tally Narration Types</h2>
+                <button class="modal-close" onclick="app.closeNarrationRules()">✕</button>
+            </div>
+            <p class="cfg-hint" style="padding:0 2px;">Each type builds one sentence: "Being " + an optional % + a fixed phrase + the document number you enter at completion + an optional note + this entry's Mail Chain. Set the templates up here, once.</p>
+            <div id="narrationRulesList" style="display:flex; flex-direction:column; gap:8px; max-height:220px; overflow-y:auto; margin: 10px 0;"></div>
+            <div class="form-group">
+                <label>Narration Type Name</label>
+                <input autocomplete="off" type="text" id="nrName" placeholder="e.g. Advance against Purchase Order">
+            </div>
+            <label style="display:flex; align-items:center; gap:8px; font-size:0.82rem; color:var(--label-2); margin-bottom:14px; cursor:pointer;">
+                <input type="checkbox" id="nrHasPercent" style="width:auto;"> Has a % field (e.g. advance payments)
+            </label>
+            <div class="form-group">
+                <label>Fixed Phrase <span style="font-weight:400; text-transform:none; letter-spacing:0;">(ends right where the document number goes)</span></label>
+                <input autocomplete="off" type="text" id="nrPhrase" placeholder="e.g. Advance amount paid against Po No: ">
+            </div>
+            <div class="form-group">
+                <label>Document Field Label</label>
+                <input autocomplete="off" type="text" id="nrDocLabel" placeholder="e.g. PO No">
+            </div>
+            <div class="modal-buttons" style="margin-top:14px;">
+                <button type="button" class="btn-modal primary" onclick="app.saveNarrationRule()">Save Narration Type</button>
+                <button type="button" class="btn-modal secondary" onclick="app.resetNrForm()">Clear Form</button>
             </div>
         </div>
     </div>
