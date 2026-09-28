@@ -610,6 +610,7 @@ const app = {
             case 'email-task': this.convertEmailToTask(id); break;
             case 'alarm-done': this.alarmAction('done', id); break;
             case 'alarm-ack': this.alarmAction('ack', id); break;
+            case 'alarm-skip': this.alarmAction('skip', id); break;
             case 'alarm-snooze': this.alarmAction('snooze', id); break;
             case 'alarm-reschedule': this.alarmAction('reschedule', id); break;
             case 'dash-filter': this.filterFromDashboard(el.dataset.ftype, el.dataset.fvalue); break;
@@ -1319,6 +1320,7 @@ const app = {
                 <div class="alarm-actions" style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
                     <button type="button" class="btn-row ok" data-action="alarm-done" data-id="${idAttr}" style="padding: 6px 12px; font-size: 0.78rem; font-weight: 600; color: var(--green-ink); background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.2); border-radius: 10px; cursor: pointer;">Mark done</button>
                     <button type="button" class="btn-row warn" data-action="alarm-ack" data-id="${idAttr}" style="padding: 6px 12px; font-size: 0.78rem; font-weight: 600; color: var(--amber-ink); background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.2); border-radius: 10px; cursor: pointer;">Silence today</button>
+                    <button type="button" class="btn-row" data-action="alarm-skip" data-id="${idAttr}" title="Not doing this today — kept out of today's report" style="padding: 6px 12px; font-size: 0.78rem; font-weight: 600; color: var(--label-2); background: var(--fill); border: 1px solid var(--line); border-radius: 10px; cursor: pointer;">Skip</button>
                     <span class="alarm-field" style="display: flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 10px; background: var(--input-bg); border: 1px solid var(--line);">
                         <input type="number" min="1" id="snoozeMins_${idAttr}" placeholder="Min" style="font-size: 0.84rem; color: var(--label); background: transparent; border: none; outline: none; padding: 4px; width: 50px; text-align: center;">
                         <button type="button" class="btn-row go" data-action="alarm-snooze" data-id="${idAttr}" style="padding: 6px 12px; font-size: 0.78rem; font-weight: 600; color: var(--blue-ink); background: rgba(37, 99, 235, 0.1); border: 1px solid rgba(37, 99, 235, 0.2); border-radius: 10px; cursor: pointer;">Snooze</button>
@@ -1381,6 +1383,21 @@ const app = {
             task.updatedAt = Date.now();
             this.saveData(); this.renderTable();
             this.showToast("Task silenced for today.", "info");
+        } else if (action === 'skip') {
+            // Explicitly "not doing this today" — silences the alert like
+            // Silence today, but also records the date it was skipped on
+            // (Register can show it). It never touches status/completedDate
+            // and logTaskActivity only ever forwards "completed" to the
+            // Daily Activity Report feed, so a skipped task can't appear in
+            // today's report either way.
+            const todayStr = this.getLocalDateStr(new Date());
+            task.lastAckDate = todayStr;
+            task.deadlineAckDate = todayStr;
+            if (!Array.isArray(task.skippedDates)) task.skippedDates = [];
+            if (task.skippedDates.indexOf(todayStr) === -1) task.skippedDates.push(todayStr);
+            task.updatedAt = Date.now();
+            this.saveData(); this.renderTable();
+            this.showToast("Skipped for today — won't show up in today's report.", "info");
         } else if (action === 'snooze') {
             const input = document.getElementById('snoozeMins_' + taskId);
             const mins = parseInt(input ? input.value : '', 10) || 0;
@@ -3238,6 +3255,8 @@ const app = {
 
             const recBadge = (t.recurrence && t.recurrence !== 'None')
                 ? `<span class="rec-badge">${this.sanitize(t.recurrence)}</span>` : '';
+            const skipBadge = (Array.isArray(t.skippedDates) && t.skippedDates.indexOf(this.getLocalDateStr(new Date())) !== -1)
+                ? `<span class="skip-badge" title="Marked as not done today from the Past Due Alert">Skipped today</span>` : '';
 
             const mailChainHtml = t.mailChain ? `
                 <div class="mailchain">
@@ -3246,7 +3265,7 @@ const app = {
                             title="Copy reference" aria-label="Copy reference">${this.SVGS.copy}</button>
                 </div>` : '';
 
-            const descHtml = `<div class="task-line" title="${this.escAttr(t.description)}">${this.sanitize(t.description)}${recBadge}</div>${mailChainHtml}`;
+            const descHtml = `<div class="task-line" title="${this.escAttr(t.description)}">${this.sanitize(t.description)}${recBadge}${skipBadge}</div>${mailChainHtml}`;
             const viewMailBtn = t.emailId
                 ? `<button type="button" class="btn-icon go" data-action="open-mail" data-id="${idAttr}" title="Open Mail">${this.SVGS.mail}</button>` : '';
 
@@ -3338,6 +3357,9 @@ const app = {
             if (t.priority) chips.push(`<span class="chip pri-${this.escAttr(String(t.priority).replace(/\s+/g, '-'))}">${this.sanitize(t.priority)}</span>`);
             if (t.category) chips.push(`<span class="chip cat">${this.sanitize(t.category)}</span>`);
             if (t.recurrence && t.recurrence !== 'None') chips.push(`<span class="chip rec">${this.sanitize(t.recurrence)}</span>`);
+            if (Array.isArray(t.skippedDates) && t.skippedDates.indexOf(this.getLocalDateStr(new Date())) !== -1) {
+                chips.push(`<span class="skip-badge" title="Marked as not done today from the Past Due Alert">Skipped today</span>`);
+            }
             if (t.pendingWith) chips.push(`<span class="chip person">${this.sanitize(t.pendingWith)}</span>`);
             if (t.mailChain) chips.push(`<button type="button" class="chip mail" data-action="copy-mail" data-id="${idAttr}" title="${this.escAttr(t.mailChain)}">${this.SVGS.copy}<span class="chip-txt">${this.sanitize(t.mailChain)}</span></button>`);
 
