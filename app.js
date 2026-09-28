@@ -242,14 +242,23 @@ const app = {
         }).then(res => res.json());
     },
 
+    // A status that means no work has happened on this entry yet — never
+    // worth a Daily Activity Report line by itself. Matched loosely so it
+    // still works whatever this profile's exact status list says.
+    isUnstartedStatus(status) {
+        return /not\s*(yet\s*)?start/i.test(String(status || '').trim());
+    },
+
     /* ---------- ACTIVITY LOG (fire-and-forget: never blocks or fails the
        actual task action if the cloud URL is unset or the request fails).
-       Only "completed" is logged — the Daily Activity Report is built from
-       this feed, and it should only ever list tasks that were actually
-       finished today, not every edit/reschedule/reopen/bin touch. ---------- */
+       Only "completed" and "status-changed" are logged — the Daily
+       Activity Report is built from this feed, and it should only ever
+       list tasks that were actually finished or moved forward today, not
+       every edit/reschedule/reopen/bin touch, and never a status change
+       that just lands back on "Not yet started". ---------- */
     logTaskActivity(task, action, details) {
         if (!task || !this.currentUser) return;
-        if (action !== 'completed') return;
+        if (action !== 'completed' && action !== 'status-changed') return;
         if ((localStorage.getItem(CONFIG.SYNC_URL_KEY) || "").trim() === "") return;
         this.cloudRequest({
             action: 'logActivity',
@@ -1317,6 +1326,8 @@ const app = {
                 ${deadlineBanner}
                 ${nonWorkingBanner}
                 <div class="alarm-meta" style="display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0;">${chips.join('')}</div>
+                <input type="text" id="alarmRemarks_${idAttr}" placeholder="Remarks / notes for today (optional) — e.g. Nothing to do Today"
+                       style="width: 100%; box-sizing: border-box; padding: 8px 10px; margin-bottom: 8px; font-size: 0.82rem; color: var(--label); background: var(--input-bg); border: 1px solid var(--line); border-radius: 10px;">
                 <div class="alarm-actions" style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
                     <button type="button" class="btn-row ok" data-action="alarm-done" data-id="${idAttr}" style="padding: 6px 12px; font-size: 0.78rem; font-weight: 600; color: var(--green-ink); background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.2); border-radius: 10px; cursor: pointer;">Mark done</button>
                     <button type="button" class="btn-row warn" data-action="alarm-ack" data-id="${idAttr}" style="padding: 6px 12px; font-size: 0.78rem; font-weight: 600; color: var(--amber-ink); background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.2); border-radius: 10px; cursor: pointer;">Silence today</button>
@@ -1371,12 +1382,23 @@ const app = {
         const task = this.findTask(taskId);
         if (!task) return;
 
+        // Whatever's typed in the alert's Remarks box travels with the
+        // task either way: saved onto its Notes so it's never lost, and —
+        // for "Mark done" specifically — handed straight to the Daily
+        // Activity Report as that entry's details, so a quick remark here
+        // is often the only editing the report needs.
+        const remarkEl = document.getElementById('alarmRemarks_' + taskId);
+        const remark = remarkEl ? remarkEl.value.trim() : '';
+        if (remark) {
+            task.notes = (task.notes ? task.notes + '\n' : '') + '[' + this.formatDateStr(this.getLocalDateStr(new Date())) + '] ' + remark;
+        }
+
         if (action === 'done') {
             if (!this.subCategoryComplete(task)) {
                 this.tryCompleteTask(taskId);
                 return;
             }
-            this.markComplete(taskId);
+            this.markComplete(taskId, remark);
         } else if (action === 'ack') {
             task.lastAckDate = this.getLocalDateStr(new Date());
             task.deadlineAckDate = task.lastAckDate;
@@ -3602,23 +3624,23 @@ const app = {
         const status = document.getElementById('taskStatus').value;
         const statusNorm = String(status || '').trim().toLowerCase();
 
-        const domesticBox = document.getElementById('domesticCompletedFields');
         const importBox = document.getElementById('importInProgressFields');
         const subCategoryBox = document.getElementById('subCategoryField');
         const narrationBox = document.getElementById('tallyNarrationBox');
 
-        const showDomestic = this.isDomesticPaymentCategory(cat) && statusNorm === 'completed';
         const showImport = this.isImportPaymentCategory(cat) && statusNorm === 'in progress';
         // A category's Sub Category only needs filling in once the entry is
         // actually being marked Completed / Done — not while it's still
         // open — so it stays out of the way until it's actually required.
+        // Which fields it asks for (PO No, Invoice No, or anything else) is
+        // entirely up to what the user defined for it in Manage Sub
+        // Categories — nothing is required by default here.
         const showSubCategory = this.categoryHasSubCategory(cat) && statusNorm === 'completed';
         // Tally Narration is offered on every payment, whatever its
         // category — same "at completion" timing as Sub Category, but
         // never required unless a Narration Type is actually picked.
         const showNarration = statusNorm === 'completed';
 
-        if (domesticBox) domesticBox.style.display = showDomestic ? '' : 'none';
         if (importBox) importBox.style.display = showImport ? '' : 'none';
         if (subCategoryBox) subCategoryBox.style.display = showSubCategory ? '' : 'none';
         if (narrationBox) narrationBox.style.display = showNarration ? '' : 'none';
@@ -3626,11 +3648,6 @@ const app = {
         // A hidden condition's old values must not silently ride along on
         // save just because the category/status changed after they were
         // filled in — clear whatever no longer applies.
-        if (!showDomestic) {
-            document.getElementById('pdPoNumber').value = '';
-            document.getElementById('pdInvoiceNumbers').value = '';
-            document.getElementById('pdNarration').value = '';
-        }
         if (!showImport) {
             document.getElementById('pdPaymentPercent').value = '';
             this.setSelectValue('pdPaymentType', '');
@@ -3654,9 +3671,6 @@ const app = {
 
     renderPaymentDetails(pd) {
         pd = pd || {};
-        document.getElementById('pdPoNumber').value = pd.poNumber || '';
-        document.getElementById('pdInvoiceNumbers').value = pd.invoiceNumbers || '';
-        document.getElementById('pdNarration').value = pd.narration || '';
         document.getElementById('pdPaymentPercent').value = pd.paymentPercent || '';
         this.setSelectValue('pdPaymentType', pd.paymentType || '');
         this.setSelectValue('pdPaymentAgainst', pd.paymentAgainst || '');
@@ -3665,9 +3679,6 @@ const app = {
 
     collectPaymentDetails() {
         return {
-            poNumber: document.getElementById('pdPoNumber').value.trim(),
-            invoiceNumbers: document.getElementById('pdInvoiceNumbers').value.trim(),
-            narration: document.getElementById('pdNarration').value.trim(),
             paymentPercent: document.getElementById('pdPaymentPercent').value.trim(),
             paymentType: document.getElementById('pdPaymentType').value,
             paymentAgainst: document.getElementById('pdPaymentAgainst').value
@@ -3977,12 +3988,6 @@ const app = {
     // Returns an error message if a required conditional field is missing
     // for the category+status combo currently selected, or '' if fine.
     validatePaymentDetails(fields) {
-        if (this.isDomesticPaymentCategory(fields.category) && String(fields.status).trim().toLowerCase() === 'completed') {
-            const pd = this.collectPaymentDetails();
-            if (!pd.poNumber || !pd.invoiceNumbers || !pd.narration) {
-                return 'Domestic Payment marked Completed needs a PO Number, Invoice(s), and Narration.';
-            }
-        }
         if (this.isImportPaymentCategory(fields.category) && String(fields.status).trim().toLowerCase() === 'in progress') {
             const pd = this.collectPaymentDetails();
             if (!pd.paymentPercent || !pd.paymentType || !pd.paymentAgainst) {
@@ -4058,7 +4063,8 @@ const app = {
 
             const dueChanged = (task.dueDate || '') !== fields.dueDate || (task.dueTime || '') !== fields.dueTime;
             const deadlineChanged = (task.deadlineDate || '') !== fields.deadlineDate || (task.deadlineTime || '') !== fields.deadlineTime;
-            const statusChanged = task.status !== fields.status;
+            const oldStatus = task.status;
+            const statusChanged = oldStatus !== fields.status;
             Object.assign(task, fields);
             if (dueChanged) { task.lastAckDate = null; task.snoozeUntil = null; }
             if (deadlineChanged) { task.deadlineAckDate = null; }
@@ -4070,11 +4076,14 @@ const app = {
                 task.completedDate = null;
             }
 
-            const changeNotes = [];
-            if (dueChanged) changeNotes.push('due date/time changed');
-            if (deadlineChanged) changeNotes.push('deadline changed');
-            if (statusChanged) changeNotes.push('status → ' + fields.status);
-            this.logTaskActivity(task, 'edited', changeNotes.join('; '));
+            // Any real status move (not landing back on "Not yet started")
+            // is a day's work worth reporting — completing it is just one
+            // case of that, so it goes through the same "status-changed"
+            // log rather than needing markComplete() to have been used.
+            if (statusChanged && !this.isUnstartedStatus(fields.status)) {
+                this.logTaskActivity(task, fields.status === 'Completed' ? 'completed' : 'status-changed',
+                    'Status changed from "' + (oldStatus || '—') + '" to "' + fields.status + '"');
+            }
         } else {
             const task = Object.assign({
                 id: this.newId(),
@@ -4089,7 +4098,13 @@ const app = {
             }, fields);
             if (task.status === 'Completed') task.completedDate = todayStr;
             this.tasks.push(task);
-            this.logTaskActivity(task, 'created', '');
+            // A brand-new entry isn't "work done today" by itself — unless
+            // it was logged already at a real (non-"Not yet started")
+            // status, which is itself that day's status.
+            if (!this.isUnstartedStatus(task.status)) {
+                this.logTaskActivity(task, task.status === 'Completed' ? 'completed' : 'status-changed',
+                    'Logged with status "' + task.status + '"');
+            }
         }
 
         this.closeTaskModal();
@@ -4170,7 +4185,7 @@ const app = {
         this.markComplete(id);
     },
 
-    markComplete(id) {
+    markComplete(id, remark) {
         const t = this.findTask(id);
         if (!t) return;
 
@@ -4189,7 +4204,9 @@ const app = {
         this.saveData();
         this.renderTable();
         this.processEngine();
-        this.logTaskActivity(t, 'completed', '');
+        // A remark typed in the Past Due Alert becomes this entry's report
+        // details directly — often the only editing the report needs.
+        this.logTaskActivity(t, 'completed', remark || '');
         this.showToast(
             repeat ? 'Done — next occurrence scheduled.' : 'Marked complete.',
             'success',
