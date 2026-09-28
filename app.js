@@ -249,6 +249,17 @@ const app = {
         return /not\s*(yet\s*)?start/i.test(String(status || '').trim());
     },
 
+    // What actually goes into a report line for this task: the Tally
+    // Narration if one was generated (it's already the clearest, most
+    // complete description of what was done), otherwise whatever is in
+    // Notes (which also picks up any remark typed in the Past Due Alert),
+    // otherwise the fallback the caller supplies.
+    reportDetailsFor(task, fallback) {
+        if (task && task.narration && task.narration.text) return task.narration.text;
+        if (task && task.notes) return task.notes;
+        return fallback || '';
+    },
+
     /* ---------- ACTIVITY LOG (fire-and-forget: never blocks or fails the
        actual task action if the cloud URL is unset or the request fails).
        Only "completed" and "status-changed" are logged — the Daily
@@ -256,18 +267,24 @@ const app = {
        list tasks that were actually finished or moved forward today, not
        every edit/reschedule/reopen/bin touch, and never a status change
        that just lands back on "Not yet started". ---------- */
-    logTaskActivity(task, action, details) {
+    logTaskActivity(task, action, details, dateOverride) {
         if (!task || !this.currentUser) return;
         if (action !== 'completed' && action !== 'status-changed') return;
-        if ((localStorage.getItem(CONFIG.SYNC_URL_KEY) || "").trim() === "") return;
-        this.cloudRequest({
+        if ((localStorage.getItem(CONFIG.SYNC_URL_KEY) || "").trim() === "") return Promise.resolve();
+        return this.cloudRequest({
             action: 'logActivity',
             logType: 'task',
             entry: {
                 taskId: task.id,
                 taskDescription: task.description,
                 action: action,
-                details: details || ''
+                details: details || '',
+                // Sent explicitly so the report can group by the date this
+                // was actually done in the user's own local timezone,
+                // rather than whatever timezone the request lands in.
+                // resyncCompletedForReport() passes the entry's own
+                // completedDate here when backfilling a past date.
+                date: dateOverride || this.getLocalDateStr(new Date())
             }
         }).catch(() => {});
     },
@@ -296,6 +313,29 @@ const app = {
                 this.showToast('Activity logged.', 'success');
             })
             .catch(err => this.showToast(err.message || 'Failed to log activity', 'error'));
+    },
+
+    // Safety net for the Daily Activity Report: re-sends every entry that's
+    // actually Completed on the chosen date to the activity log, in case
+    // any of them were completed through a path that didn't log at the
+    // time (an older version of the app, a dropped request, etc.). A Skip
+    // never sets status to Completed, so a skipped-but-still-open entry is
+    // naturally excluded already. Always safe to run again — it just
+    // re-sends the same "completed" entries, it never invents new ones.
+    resyncCompletedForReport() {
+        const dateEl = document.getElementById('dailyReportDate');
+        const date = dateEl.value || this.getLocalDateStr(new Date());
+        const matches = this.tasks.filter(t => !t.deleted && t.status === 'Completed' && t.completedDate === date);
+
+        if (!matches.length) { this.showToast('No completed entries found for ' + date + '.', 'info'); return; }
+        if ((localStorage.getItem(CONFIG.SYNC_URL_KEY) || '').trim() === '') {
+            this.showToast('Cloud URL is not configured (Setup).', 'warning');
+            return;
+        }
+
+        this.showToast('Resending ' + matches.length + ' completed ' + (matches.length === 1 ? 'entry' : 'entries') + '…', 'info');
+        Promise.all(matches.map(t => this.logTaskActivity(t, 'completed', this.reportDetailsFor(t), date)))
+            .then(() => this.showToast('Resynced ' + matches.length + ' completed ' + (matches.length === 1 ? 'entry' : 'entries') + ' for ' + date + ' — generate the report now.', 'success'));
     },
 
     generateDailyReport() {
@@ -1331,7 +1371,7 @@ const app = {
                 <div class="alarm-actions" style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
                     <button type="button" class="btn-row ok" data-action="alarm-done" data-id="${idAttr}" style="padding: 6px 12px; font-size: 0.78rem; font-weight: 600; color: var(--green-ink); background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.2); border-radius: 10px; cursor: pointer;">Mark done</button>
                     <button type="button" class="btn-row warn" data-action="alarm-ack" data-id="${idAttr}" style="padding: 6px 12px; font-size: 0.78rem; font-weight: 600; color: var(--amber-ink); background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.2); border-radius: 10px; cursor: pointer;">Silence today</button>
-                    <button type="button" class="btn-row" data-action="alarm-skip" data-id="${idAttr}" title="Closes this out as not-performed today — completed, but kept out of today's report" style="padding: 6px 12px; font-size: 0.78rem; font-weight: 600; color: var(--label-2); background: var(--fill); border: 1px solid var(--line); border-radius: 10px; cursor: pointer;">Skip</button>
+                    <button type="button" class="btn-row" data-action="alarm-skip" data-id="${idAttr}" title="Not doing this today — stays open for another day, and today's alert is silenced without counting as done" style="padding: 6px 12px; font-size: 0.78rem; font-weight: 600; color: var(--label-2); background: var(--fill); border: 1px solid var(--line); border-radius: 10px; cursor: pointer;">Skip</button>
                     <span class="alarm-field" style="display: flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 10px; background: var(--input-bg); border: 1px solid var(--line);">
                         <input type="number" min="1" id="snoozeMins_${idAttr}" placeholder="Min" style="font-size: 0.84rem; color: var(--label); background: transparent; border: none; outline: none; padding: 4px; width: 50px; text-align: center;">
                         <button type="button" class="btn-row go" data-action="alarm-snooze" data-id="${idAttr}" style="padding: 6px 12px; font-size: 0.78rem; font-weight: 600; color: var(--blue-ink); background: rgba(37, 99, 235, 0.1); border: 1px solid rgba(37, 99, 235, 0.2); border-radius: 10px; cursor: pointer;">Snooze</button>
@@ -1398,7 +1438,7 @@ const app = {
                 this.tryCompleteTask(taskId);
                 return;
             }
-            this.markComplete(taskId, remark);
+            this.markComplete(taskId);
         } else if (action === 'ack') {
             task.lastAckDate = this.getLocalDateStr(new Date());
             task.deadlineAckDate = task.lastAckDate;
@@ -4082,7 +4122,7 @@ const app = {
             // log rather than needing markComplete() to have been used.
             if (statusChanged && !this.isUnstartedStatus(fields.status)) {
                 this.logTaskActivity(task, fields.status === 'Completed' ? 'completed' : 'status-changed',
-                    'Status changed from "' + (oldStatus || '—') + '" to "' + fields.status + '"');
+                    this.reportDetailsFor(task, 'Status changed from "' + (oldStatus || '—') + '" to "' + fields.status + '"'));
             }
         } else {
             const task = Object.assign({
@@ -4103,7 +4143,7 @@ const app = {
             // status, which is itself that day's status.
             if (!this.isUnstartedStatus(task.status)) {
                 this.logTaskActivity(task, task.status === 'Completed' ? 'completed' : 'status-changed',
-                    'Logged with status "' + task.status + '"');
+                    this.reportDetailsFor(task, 'Logged with status "' + task.status + '"'));
             }
         }
 
@@ -4185,7 +4225,7 @@ const app = {
         this.markComplete(id);
     },
 
-    markComplete(id, remark) {
+    markComplete(id) {
         const t = this.findTask(id);
         if (!t) return;
 
@@ -4204,9 +4244,9 @@ const app = {
         this.saveData();
         this.renderTable();
         this.processEngine();
-        // A remark typed in the Past Due Alert becomes this entry's report
-        // details directly — often the only editing the report needs.
-        this.logTaskActivity(t, 'completed', remark || '');
+        // Narration first, then Notes (which already picked up any remark
+        // typed in the Past Due Alert) — see reportDetailsFor.
+        this.logTaskActivity(t, 'completed', this.reportDetailsFor(t));
         this.showToast(
             repeat ? 'Done — next occurrence scheduled.' : 'Marked complete.',
             'success',
@@ -4215,41 +4255,26 @@ const app = {
         this.syncToGoogleSheets();
     },
 
-    // "Skip" from the Past Due Alert: the work was NOT performed today, but
-    // the entry is closed out (moved to Completed) the same as Mark done —
-    // the difference is it must never reach the Daily Activity Report, and
-    // it never asks for Sub Category / Narration / payment details, since
-    // nothing was actually done to record. Deliberately does NOT call
-    // logTaskActivity, which is the only thing that ever forwards a
-    // "completed" entry to that report feed.
+    // "Skip" from the Past Due Alert: today's work was NOT done — this is
+    // NOT a completion. The task stays exactly as it was (still open,
+    // still overdue) so it can be finished — and counted — on whatever
+    // day that actually happens; it's just silenced for today and marked
+    // as skipped so today's Daily Activity Report can never include it
+    // (nothing is logged, since nothing here changes status).
     skipTask(id) {
         const t = this.findTask(id);
         if (!t) return;
 
         const todayStr = this.getLocalDateStr(new Date());
-        t.status = 'Completed';
-        t.completedDate = todayStr;
-        t.lastAckDate = null;
-        t.snoozeUntil = null;
-        t.updatedAt = Date.now();
+        t.lastAckDate = todayStr;
+        t.deadlineAckDate = todayStr;
         if (!Array.isArray(t.skippedDates)) t.skippedDates = [];
         if (t.skippedDates.indexOf(todayStr) === -1) t.skippedDates.push(todayStr);
-
-        const repeat = this.nextOccurrence(t);
-        if (repeat) {
-            if (!t.seriesId) t.seriesId = repeat.seriesId;
-            this.tasks.push(repeat);
-        }
+        t.updatedAt = Date.now();
 
         this.saveData();
         this.renderTable();
-        this.processEngine();
-        this.showToast(
-            "Skipped — closed out, won't be in today's report.",
-            'info',
-            { label: 'Undo', onClick: () => this.undoComplete(id, repeat ? repeat.id : null) }
-        );
-        this.syncToGoogleSheets();
+        this.showToast("Skipped for today — still open, and won't be in today's report.", "info");
     },
 
     undoComplete(id, spawnedId) {
@@ -5015,7 +5040,7 @@ const app = {
                 t.updatedAt = Date.now();
                 const repeat = this.nextOccurrence(t);
                 if (repeat) { if (!t.seriesId) t.seriesId = repeat.seriesId; spawned.push(repeat); }
-                this.logTaskActivity(t, 'completed', '');
+                this.logTaskActivity(t, 'completed', this.reportDetailsFor(t));
             } else if (kind === 'reopen') {
                 t.status = pending;
                 t.completedDate = null; t.lastAckDate = null; t.snoozeUntil = null;
