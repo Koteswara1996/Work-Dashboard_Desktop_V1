@@ -791,6 +791,14 @@
         }
         .form-group textarea { min-height: 100px; resize: vertical; line-height: 1.5; }
         .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+        .form-row-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+        @media (min-width: 901px) and (max-width: 1100px) {
+            .form-row-4 { grid-template-columns: repeat(2, 1fr); }
+        }
+        /* A wider entry screen for forms with a lot of side-by-side fields
+           (the Task modal) — makes real use of a desktop-sized window
+           instead of stranding a narrow card in the middle of it. */
+        .modal-wide { max-width: 1040px; }
 
         .modal-buttons { display: flex; gap: 12px; margin-top: 32px; }
         .btn-modal {
@@ -1163,6 +1171,7 @@
         html[data-shell="mobile"] .modal-content { max-width: 100%; max-height: 85dvh; border-radius: 32px 32px 0 0; padding: 24px 24px calc(32px + env(safe-area-inset-bottom, 0px)); animation: sheetSlideUp 0.3s var(--ease-spring) both; }
         html[data-shell="mobile"] .modal-header::before { content: ''; position: absolute; top: 10px; left: 50%; transform: translateX(-50%); width: 40px; height: 5px; border-radius: 4px; background: var(--line-strong); }
         html[data-shell="mobile"] .form-row { grid-template-columns: 1fr; gap: 12px; }
+        html[data-shell="mobile"] .form-row-4 { grid-template-columns: 1fr; gap: 12px; }
         html[data-shell="mobile"] .modal-buttons { flex-direction: column; }
         html[data-shell="mobile"] .btn-modal { width: 100%; }
         html[data-shell="mobile"] #toastContainer { top: calc(var(--appbar-h) + 10px); bottom: auto; width: calc(100vw - 24px); align-items: stretch; }
@@ -1377,7 +1386,13 @@
                 <button type="button" class="search-cancel-btn" onclick="app.collapseSearch('register')" title="Close search">✕</button>
             </div>
 
-            <button type="button" class="btn-icon gear-btn" id="registerGearBtn" onclick="app.toggleFilterPanel('register')" title="Filters &amp; more">⚙️<span class="gear-dot" id="registerFilterDot"></span></button>
+            <button type="button" class="btn-icon gear-btn" id="registerGearBtn" onclick="app.toggleFilterPanel('register')" title="Filter by category, priority, status, pending with, due date">⚙️<span class="gear-dot" id="registerFilterDot"></span></button>
+            <button type="button" class="btn-icon" onclick="app.toggleSelectMode()" title="Select several entries">☑</button>
+            <button type="button" class="btn-icon" id="sortToggleRegister" onclick="app.openSortMenu('Register', this)" title="Sort">🔃</button>
+            <button type="button" class="btn-icon" onclick="app.fitColumns('register')" title="Fit Columns">⤢</button>
+            <button type="button" class="btn-icon" onclick="app.printRegister()" title="Print">🖨️</button>
+            <button type="button" class="btn-icon" onclick="app.openEmailModal()" title="Mail">📧</button>
+            <button type="button" class="btn-icon bad" onclick="app.clearFilters()" title="Clear All Filters">🚫</button>
             <button class="btn-icon view-toggle" onclick="app.toggleViewMode()" title="Switch between table and cards">▦</button>
             <button class="btn-new-entry" onclick="app.openTaskModal()" title="New Entry">＋</button>
 
@@ -1413,15 +1428,6 @@
                         <option value="NoDue">No due date</option>
                     </select>
                 </div>
-                <div class="filter-panel-divider"></div>
-                <div class="filter-panel-actions">
-                    <button type="button" class="fp-action-btn" onclick="app.toggleSelectMode()">☑ Select</button>
-                    <button type="button" class="fp-action-btn" id="sortToggleRegister" onclick="app.openSortMenu('Register', this)">🔃 Sort</button>
-                    <button type="button" class="fp-action-btn" onclick="app.fitColumns('register')">⤢ Fit Columns</button>
-                    <button type="button" class="fp-action-btn" onclick="app.printRegister()">🖨️ Print</button>
-                    <button type="button" class="fp-action-btn" onclick="app.openEmailModal()">📧 Mail</button>
-                </div>
-                <button type="button" class="fp-action-btn danger" onclick="app.clearFilters()">🚫 Clear All Filters</button>
             </div>
         </div>
 
@@ -1462,7 +1468,8 @@
                 <button type="button" class="search-cancel-btn" onclick="app.collapseSearch('holidays')" title="Close search">✕</button>
             </div>
 
-            <button type="button" class="btn-icon gear-btn" id="holidaysGearBtn" onclick="app.toggleFilterPanel('holidays')" title="Filters &amp; more">⚙️<span class="gear-dot" id="holidaysFilterDot"></span></button>
+            <button type="button" class="btn-icon gear-btn" id="holidaysGearBtn" onclick="app.toggleFilterPanel('holidays')" title="Filter by calendar, alerts-on only">⚙️<span class="gear-dot" id="holidaysFilterDot"></span></button>
+            <button type="button" class="btn-icon bad" onclick="app.clearHolidayFilters()" title="Clear All Filters">🚫</button>
             <button class="btn-icon view-toggle" onclick="app.toggleViewMode()" title="Switch between table and cards">▦</button>
             <button class="btn-new-entry" onclick="app.openHolidayModal()" title="Add Holiday">＋</button>
 
@@ -1480,8 +1487,6 @@
                         <input type="checkbox" id="filterHolidayAlertOnly" style="width:16px; height:16px; accent-color:var(--accent);" onchange="app.renderHolidays(); app.markFilterDot('holidays');"> Alerts-on only
                     </label>
                 </div>
-                <div class="filter-panel-divider"></div>
-                <button type="button" class="fp-action-btn danger" onclick="app.clearHolidayFilters()">🚫 Clear All Filters</button>
             </div>
         </div>
 
@@ -1517,7 +1522,11 @@
                 <button type="button" class="search-cancel-btn" onclick="app.collapseSearch('completed')" title="Close search">✕</button>
             </div>
 
-            <button type="button" class="btn-icon gear-btn" id="completedGearBtn" onclick="app.toggleFilterPanel('completed')" title="Filters &amp; more">⚙️<span class="gear-dot" id="completedFilterDot"></span></button>
+            <button type="button" class="btn-icon gear-btn" id="completedGearBtn" onclick="app.toggleFilterPanel('completed')" title="Filter by category">⚙️<span class="gear-dot" id="completedFilterDot"></span></button>
+            <button type="button" class="btn-icon" onclick="app.toggleSelectMode()" title="Select several entries">☑</button>
+            <button type="button" class="btn-icon" id="sortToggleCompleted" onclick="app.openSortMenu('Completed', this)" title="Sort">🔃</button>
+            <button type="button" class="btn-icon" onclick="app.fitColumns('completed')" title="Fit Columns">⤢</button>
+            <button type="button" class="btn-icon bad" onclick="app.clearFilters()" title="Clear All Filters">🚫</button>
             <button class="btn-icon view-toggle" onclick="app.toggleViewMode()" title="Switch between table and cards">▦</button>
 
             <div class="filter-panel" id="completedFilterPanel">
@@ -1528,13 +1537,6 @@
                         <div class="ms-options" id="filterCategoryCompletedOpts"></div>
                     </div>
                 </div>
-                <div class="filter-panel-divider"></div>
-                <div class="filter-panel-actions">
-                    <button type="button" class="fp-action-btn" onclick="app.toggleSelectMode()">☑ Select</button>
-                    <button type="button" class="fp-action-btn" id="sortToggleCompleted" onclick="app.openSortMenu('Completed', this)">🔃 Sort</button>
-                    <button type="button" class="fp-action-btn" onclick="app.fitColumns('completed')">⤢ Fit Columns</button>
-                </div>
-                <button type="button" class="fp-action-btn danger" onclick="app.clearFilters()">🚫 Clear All Filters</button>
             </div>
         </div>
 
@@ -1665,6 +1667,7 @@
             <p class="cfg-hint">Summarizes today's Task Activity Log (with full task detail) + General Activity Log + any saved style samples above, into a report written by Gemini.</p>
             <div class="sheet-grid" style="gap:10px;">
                 <input autocomplete="off" type="date" id="dailyReportDate" style="grid-column: 1 / -1;">
+                <button class="btn-modal secondary" style="grid-column: 1 / -1;" onclick="app.resyncCompletedForReport()" title="Re-sends every Completed entry for this date to the report log — safe to run any time, in case any completion didn't get logged">Resync completed tasks for this date</button>
                 <button class="btn-modal primary" style="grid-column: 1 / -1;" onclick="app.generateDailyReport()">Generate report</button>
             </div>
             <div id="dailyReportOutput" style="display:none; margin-top:12px; padding:14px; border-radius:14px; background:var(--input-bg); border:1px solid var(--line); white-space:pre-wrap; font-size:0.86rem; line-height:1.6; color:var(--label);"></div>
@@ -1763,7 +1766,7 @@
 
     <!-- TASK MODAL -->
     <div class="modal" id="taskModal">
-        <div class="modal-content">
+        <div class="modal-content modal-wide">
             <div class="modal-header">
                 <h2 id="modalTitle">New Entry</h2>
                 <button class="modal-close" onclick="app.closeTaskModal()">✕</button>
@@ -1773,7 +1776,7 @@
                     <label>Task Description</label>
                     <input autocomplete="off" type="text" id="taskDescription" required placeholder="e.g. Follow up on LC opening">
                 </div>
-                <div class="form-row">
+                <div class="form-row-4">
                     <div class="form-group">
                         <label>Category <a href="#" class="edit-options-btn" onclick="app.openListManager('categories'); return false;">Edit</a></label>
                         <select id="taskCategory" onchange="app.updateConditionalFields()"><option value="">Select category</option></select>
@@ -1782,13 +1785,6 @@
                         <label>Priority <a href="#" class="edit-options-btn" onclick="app.openListManager('priorities'); return false;">Edit</a></label>
                         <select id="taskPriority"></select>
                     </div>
-                </div>
-                <div class="form-group" id="subCategoryField" style="display:none;">
-                    <label>Sub Category <a href="#" class="edit-options-btn" onclick="app.openSubCategoryRules(); return false;">Manage rules</a></label>
-                    <select id="taskSubCategory" onchange="app.renderSubCategoryFields()"><option value="">Select Sub Category</option></select>
-                    <div id="subCategoryRuleFields" style="margin-top:10px; display:flex; flex-direction:column; gap:10px;"></div>
-                </div>
-                <div class="form-row">
                     <div class="form-group">
                         <label>Status <a href="#" class="edit-options-btn" onclick="app.openListManager('statuses'); return false;">Edit</a></label>
                         <select id="taskStatus" onchange="app.updateConditionalFields()"></select>
@@ -1797,6 +1793,11 @@
                         <label>Pending With <a href="#" class="edit-options-btn" onclick="app.openListManager('pendingWith'); return false;">Edit</a></label>
                         <select id="taskPendingWith"><option value="">Select person</option></select>
                     </div>
+                </div>
+                <div class="form-group" id="subCategoryField" style="display:none;">
+                    <label>Sub Category <a href="#" class="edit-options-btn" onclick="app.openSubCategoryRules(); return false;">Manage rules</a></label>
+                    <select id="taskSubCategory" onchange="app.renderSubCategoryFields()"><option value="">Select Sub Category</option></select>
+                    <div id="subCategoryRuleFields" style="margin-top:10px; display:flex; flex-direction:column; gap:10px;"></div>
                 </div>
                 <div id="importInProgressFields" style="display:none;">
                     <div class="form-row">
@@ -1826,20 +1827,22 @@
                         </select>
                     </div>
                 </div>
-                <div class="form-group">
-                    <label style="color:var(--accent);">Due Date & Time</label>
-                    <div style="display:flex; gap:12px;">
-                        <input autocomplete="off" type="date" id="taskDueDate" onchange="app.checkDueHoliday(); app.checkSlotAvailability()">
-                        <input autocomplete="off" type="time" id="taskDueTime" onchange="app.checkSlotAvailability()">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label style="color:var(--accent);">Due Date & Time</label>
+                        <div style="display:flex; gap:12px;">
+                            <input autocomplete="off" type="date" id="taskDueDate" onchange="app.checkDueHoliday(); app.checkSlotAvailability()">
+                            <input autocomplete="off" type="time" id="taskDueTime" onchange="app.checkSlotAvailability()">
+                        </div>
+                        <div class="due-hint" id="dueHolidayHint"></div>
+                        <div class="due-hint" id="dueSlotHint"></div>
                     </div>
-                    <div class="due-hint" id="dueHolidayHint"></div>
-                    <div class="due-hint" id="dueSlotHint"></div>
-                </div>
-                <div class="form-group">
-                    <label>Deadline <span style="font-weight:400; text-transform:none; letter-spacing:0; color:var(--label-2);">(optional — separate hard cutoff; you'll be alerted once it's crossed)</span></label>
-                    <div style="display:flex; gap:12px;">
-                        <input autocomplete="off" type="date" id="taskDeadlineDate">
-                        <input autocomplete="off" type="time" id="taskDeadlineTime">
+                    <div class="form-group">
+                        <label>Deadline <span style="font-weight:400; text-transform:none; letter-spacing:0; color:var(--label-2);">(optional — alerted once crossed)</span></label>
+                        <div style="display:flex; gap:12px;">
+                            <input autocomplete="off" type="date" id="taskDeadlineDate">
+                            <input autocomplete="off" type="time" id="taskDeadlineTime">
+                        </div>
                     </div>
                 </div>
                 <div class="form-row">
