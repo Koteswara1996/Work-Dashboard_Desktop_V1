@@ -595,6 +595,11 @@ const app = {
                 if (t) this.copyToClipboard(t.mailChain || '', el);
                 break;
             }
+            case 'copy-narration': {
+                const t = this.findTask(id);
+                if (t) this.copyToClipboard((t.narration && t.narration.text) || '', el);
+                break;
+            }
             case 'open-mail': {
                 const t = this.findTask(id);
                 if (t && t.emailId) window.open(this.gmailUrl(t.emailId), '_blank');
@@ -1703,7 +1708,9 @@ const app = {
             subCategories: [],
             // Categories that were opted into having a Sub Category at the
             // time they were created/edited (see categoryHasSubCategory).
-            subCategoryCategories: []
+            subCategoryCategories: [],
+            // Tally Narration sentence templates (see buildNarrationText).
+            narrationTypes: []
         };
         let parsedStored = null;
         try {
@@ -1744,6 +1751,28 @@ const app = {
             );
         } else {
             this.lists.subCategories = [];
+        }
+
+        // One-time default: seed the standard set of Tally Narration
+        // templates (from the reference "Accounting Narrations" sheet) the
+        // first time this profile ever loads with the feature. After that
+        // it's entirely up to Manage Narration Types — this never runs
+        // again once a (possibly edited/emptied) list has been saved.
+        if (!Array.isArray(this.lists.narrationTypes)) this.lists.narrationTypes = [];
+        if (!parsedStored || !Array.isArray(parsedStored.narrationTypes)) {
+            this.lists.narrationTypes = [
+                { id: this.newId(), name: 'Advance against Purchase Order', hasPercent: true, phrase: 'Advance amount paid against Po No: ', docLabel: 'PO No' },
+                { id: this.newId(), name: '2nd Advance against Purchase Order', hasPercent: true, phrase: '2nd Advance amount paid against Po No: ', docLabel: 'PO No' },
+                { id: this.newId(), name: 'Balance Payment against Purchase Order/Invoice', hasPercent: false, phrase: 'Balance amount paid against Invoice No: ', docLabel: 'Invoice No' },
+                { id: this.newId(), name: 'COD Charges against Invoice', hasPercent: false, phrase: 'Amount Paid twds COD Charges Against Invoice No: ', docLabel: 'Invoice No' },
+                { id: this.newId(), name: 'COD Charges against Order Id', hasPercent: false, phrase: 'Amount Paid twds COD Charges Against Order Id: ', docLabel: 'Order Id' },
+                { id: this.newId(), name: 'I&C Charges', hasPercent: false, phrase: 'Amount paid twds I&C Charges for Order id: ', docLabel: 'Order Id' },
+                { id: this.newId(), name: 'Employee Advance Request', hasPercent: false, phrase: 'Amount Paid Against Emploee Advance Request Form No: ', docLabel: 'Form No' },
+                { id: this.newId(), name: 'Employee Advance Settlement', hasPercent: false, phrase: 'Amount Paid Against Emploee Settlement Request Form No: ', docLabel: 'Form No' },
+                { id: this.newId(), name: 'Payment against Invoice', hasPercent: false, phrase: 'amount paid against Invoice No: ', docLabel: 'Invoice No' },
+                { id: this.newId(), name: 'Legal Charges (against Case No)', hasPercent: false, phrase: 'amount paid for Legal Charges against Case No: ', docLabel: 'Case No(s)' },
+                { id: this.newId(), name: 'Legal Charges (without Case No)', hasPercent: false, phrase: 'amount paid for Legal Charges for ', docLabel: 'Description' }
+            ];
         }
     },
 
@@ -2792,6 +2821,7 @@ const app = {
         keepSelect('taskStatus', this.lists.statuses.map(opt).join(''));
         keepSelect('taskPendingWith', '<option value="">Select Person</option>' + this.lists.pendingWith.map(opt).join(''));
         keepSelect('taskSubCategory', '<option value="">Select Sub Category</option>' + (this.lists.subCategories || []).map(sc => opt(sc.name)).join(''));
+        keepSelect('taskNarrationType', '<option value="">— Not a payment / skip —</option>' + (this.lists.narrationTypes || []).map(nr => opt(nr.name)).join(''));
 
         const union = (base, field) => {
             const out = [].concat(base);
@@ -3249,6 +3279,8 @@ const app = {
                         <button type="button" class="btn-icon ok" data-action="done" data-id="${idAttr}" title="Mark Done">${this.SVGS.done}</button>
                     </td>`;
             } else if (mode === 'completed') {
+                const narrationBtn = (t.narration && t.narration.text)
+                    ? `<button type="button" class="btn-icon" data-action="copy-narration" data-id="${idAttr}" title="Copy Tally Narration">${this.SVGS.copy}</button>` : '';
                 row.innerHTML = `
                     <td class="td-clip">${this.formatDateStr(t.dateLogged, { day: 'numeric', month: 'short', year: 'numeric' })}</td>
                     <td class="td-task">${descHtml}</td>
@@ -3256,6 +3288,7 @@ const app = {
                     <td class="td-clip">${this.formatDateStr(t.completedDate || this.getLocalDateStr(new Date()))}</td>
                     <td class="action-cell">
                         ${viewMailBtn}
+                        ${narrationBtn}
                         <button type="button" class="btn-icon warn" data-action="reopen" data-id="${idAttr}" title="Reopen Task">${this.SVGS.reopen}</button>
                         <button type="button" class="btn-icon bad" data-action="bin" data-id="${idAttr}" title="Move to Bin">${this.SVGS.bin}</button>
                     </td>`;
@@ -3342,6 +3375,8 @@ const app = {
                     </div>
                     </div>`;
             } else if (mode === 'completed') {
+                const narrationBtn = (t.narration && t.narration.text)
+                    ? `<button type="button" class="btn-icon" data-action="copy-narration" data-id="${idAttr}" title="Copy Tally Narration">${this.SVGS.copy}</button>` : '';
                 card.innerHTML = `
                     <div class="tcard-title">${this.sanitize(t.description)}</div>
                     <div class="tcard-body">
@@ -3350,6 +3385,7 @@ const app = {
                         <span class="tcard-due">Completed ${this.formatDateStr(t.completedDate || this.getLocalDateStr(new Date()), { day: 'numeric', month: 'short' })}</span>
                         <div class="tcard-actions">
                             ${mailBtn}
+                            ${narrationBtn}
                             <button type="button" class="btn-icon warn" data-action="reopen" data-id="${idAttr}" title="Reopen Task">${this.SVGS.reopen}</button>
                             <button type="button" class="btn-icon bad" data-action="bin" data-id="${idAttr}" title="Move to Bin">${this.SVGS.bin}</button>
                         </div>
@@ -3463,6 +3499,7 @@ const app = {
         this.renderPaymentDetails(hasId ? (this.findTask(id) || {}).paymentDetails : {});
         this.setSelectValue('taskSubCategory', hasId ? (this.findTask(id) || {}).subCategory : '');
         this.renderSubCategoryFields(hasId ? (this.findTask(id) || {}).subCategoryFields : {});
+        this.renderNarrationFields(hasId ? (this.findTask(id) || {}).narration : null);
         if (mailBtn) mailBtn.style.display = this.storedEmailId ? '' : 'none';
         this.checkDueHoliday();
         this.checkSlotAvailability();
@@ -3559,6 +3596,7 @@ const app = {
         const domesticBox = document.getElementById('domesticCompletedFields');
         const importBox = document.getElementById('importInProgressFields');
         const subCategoryBox = document.getElementById('subCategoryField');
+        const narrationBox = document.getElementById('tallyNarrationBox');
 
         const showDomestic = this.isDomesticPaymentCategory(cat) && statusNorm === 'completed';
         const showImport = this.isImportPaymentCategory(cat) && statusNorm === 'in progress';
@@ -3566,10 +3604,15 @@ const app = {
         // actually being marked Completed / Done — not while it's still
         // open — so it stays out of the way until it's actually required.
         const showSubCategory = this.categoryHasSubCategory(cat) && statusNorm === 'completed';
+        // Tally Narration is offered on every payment, whatever its
+        // category — same "at completion" timing as Sub Category, but
+        // never required unless a Narration Type is actually picked.
+        const showNarration = statusNorm === 'completed';
 
         if (domesticBox) domesticBox.style.display = showDomestic ? '' : 'none';
         if (importBox) importBox.style.display = showImport ? '' : 'none';
         if (subCategoryBox) subCategoryBox.style.display = showSubCategory ? '' : 'none';
+        if (narrationBox) narrationBox.style.display = showNarration ? '' : 'none';
 
         // A hidden condition's old values must not silently ride along on
         // save just because the category/status changed after they were
@@ -3588,6 +3631,15 @@ const app = {
             this.setSelectValue('taskSubCategory', '');
             const ruleBox = document.getElementById('subCategoryRuleFields');
             if (ruleBox) ruleBox.innerHTML = '';
+        }
+        if (!showNarration) {
+            this.setSelectValue('taskNarrationType', '');
+            document.getElementById('narrationPercent').value = '';
+            document.getElementById('narrationDocNo').value = '';
+            document.getElementById('narrationPurpose').value = '';
+            document.getElementById('narrationPreview').value = '';
+            const wrap = document.getElementById('narrationFieldsWrap');
+            if (wrap) wrap.style.display = 'none';
         }
     },
 
@@ -3755,6 +3807,164 @@ const app = {
         return out;
     },
 
+    /* ---------- TALLY NARRATION ----------
+       Builds the accounting-entry sentence Tally needs for a payment,
+       straight from the same New Entry screen: "Being " + an optional % +
+       a fixed phrase (per narration type) + the document number entered at
+       completion + an optional note + the Mail Chain already captured when
+       the task was first created. Optional — only used when a Narration
+       Type is picked; skipped entirely otherwise. ---------- */
+    openNarrationRules() {
+        this.editingNrId = null;
+        this.resetNrForm();
+        this.renderNarrationRulesList();
+        document.getElementById('narrationRulesModal').classList.add('open');
+    },
+
+    closeNarrationRules() {
+        document.getElementById('narrationRulesModal').classList.remove('open');
+    },
+
+    resetNrForm() {
+        this.editingNrId = null;
+        document.getElementById('nrName').value = '';
+        document.getElementById('nrHasPercent').checked = false;
+        document.getElementById('nrPhrase').value = '';
+        document.getElementById('nrDocLabel').value = '';
+    },
+
+    renderNarrationRulesList() {
+        const box = document.getElementById('narrationRulesList');
+        if (!box) return;
+        const items = this.lists.narrationTypes || [];
+        if (!items.length) {
+            box.innerHTML = '<div class="empty-state" style="padding:14px;"><span>No narration types yet — add one below.</span></div>';
+            return;
+        }
+        box.innerHTML = items.map(nr => `
+            <div style="display:flex; align-items:center; gap:10px; padding:10px 12px; border-radius:10px; background:var(--input-bg); border:1px solid var(--line);">
+                <div style="flex:1; min-width:0;">
+                    <div style="font-weight:700; font-size:0.88rem; color:var(--label);">${this.sanitize(nr.name)}</div>
+                    <div style="font-size:0.76rem; color:var(--label-2);">Being ${nr.hasPercent ? '[%] ' : ''}${this.sanitize(nr.phrase)}[${this.sanitize(nr.docLabel)}]</div>
+                </div>
+                <button type="button" class="btn-icon" onclick="app.editNarrationRule('${this.escAttr(nr.id)}')" title="Edit">${this.SVGS.edit}</button>
+                <button type="button" class="btn-icon bad" onclick="app.deleteNarrationRule('${this.escAttr(nr.id)}')" title="Delete">${this.SVGS.bin}</button>
+            </div>`).join('');
+    },
+
+    editNarrationRule(id) {
+        const nr = (this.lists.narrationTypes || []).find(x => String(x.id) === String(id));
+        if (!nr) return;
+        this.editingNrId = nr.id;
+        document.getElementById('nrName').value = nr.name;
+        document.getElementById('nrHasPercent').checked = !!nr.hasPercent;
+        document.getElementById('nrPhrase').value = nr.phrase;
+        document.getElementById('nrDocLabel').value = nr.docLabel;
+    },
+
+    saveNarrationRule() {
+        const name = document.getElementById('nrName').value.trim();
+        if (!name) { this.showToast('Give the narration type a name.', 'warning'); return; }
+        const hasPercent = document.getElementById('nrHasPercent').checked;
+        const phrase = document.getElementById('nrPhrase').value;
+        const docLabel = document.getElementById('nrDocLabel').value.trim() || 'Document No';
+        if (!Array.isArray(this.lists.narrationTypes)) this.lists.narrationTypes = [];
+
+        if (this.editingNrId) {
+            const nr = this.lists.narrationTypes.find(x => String(x.id) === String(this.editingNrId));
+            if (nr) { nr.name = name; nr.hasPercent = hasPercent; nr.phrase = phrase; nr.docLabel = docLabel; }
+        } else {
+            if (this.lists.narrationTypes.some(x => x.name.toLowerCase() === name.toLowerCase())) {
+                this.showToast('A narration type with that name already exists.', 'warning');
+                return;
+            }
+            this.lists.narrationTypes.push({ id: this.newId(), name, hasPercent, phrase, docLabel });
+        }
+
+        this.saveLists();
+        this.resetNrForm();
+        this.renderNarrationRulesList();
+        this.showToast('Narration type saved.', 'success');
+    },
+
+    deleteNarrationRule(id) {
+        if (!confirm('Delete this narration type?')) return;
+        this.lists.narrationTypes = (this.lists.narrationTypes || []).filter(x => String(x.id) !== String(id));
+        this.saveLists();
+        this.renderNarrationRulesList();
+        this.showToast('Narration type removed.', 'success');
+    },
+
+    // Task-modal side: shows/hides the % field and updates the document
+    // label for whichever Narration Type is currently selected.
+    onNarrationTypeChange() {
+        const name = document.getElementById('taskNarrationType').value;
+        const wrap = document.getElementById('narrationFieldsWrap');
+        const nr = (this.lists.narrationTypes || []).find(x => x.name === name);
+        if (wrap) wrap.style.display = nr ? '' : 'none';
+        const pctGroup = document.getElementById('narrationPercentGroup');
+        if (pctGroup) pctGroup.style.display = (nr && nr.hasPercent) ? '' : 'none';
+        const docLabelEl = document.getElementById('narrationDocLabel');
+        if (docLabelEl) docLabelEl.textContent = nr ? nr.docLabel : 'Document No';
+        const docInput = document.getElementById('narrationDocNo');
+        if (docInput) docInput.placeholder = nr ? ('e.g. ' + nr.docLabel) : '';
+        this.updateNarrationPreview();
+    },
+
+    // Pure builder: "Being " + [%] + fixed phrase + doc no + [note] + mail chain.
+    buildNarrationText(nr, percent, docNo, purpose, mailChain) {
+        if (!nr) return '';
+        let text = 'Being ';
+        if (nr.hasPercent && String(percent || '').trim()) text += String(percent).trim() + '% ';
+        text += nr.phrase || '';
+        text += String(docNo || '').trim();
+        if (String(purpose || '').trim()) text += ' ' + String(purpose).trim();
+        if (String(mailChain || '').trim()) text += ' ' + String(mailChain).trim();
+        return text;
+    },
+
+    updateNarrationPreview() {
+        const preview = document.getElementById('narrationPreview');
+        if (!preview) return;
+        const name = document.getElementById('taskNarrationType').value;
+        const nr = (this.lists.narrationTypes || []).find(x => x.name === name);
+        const mailChain = document.getElementById('taskMailChain') ? document.getElementById('taskMailChain').value : '';
+        preview.value = nr ? this.buildNarrationText(
+            nr,
+            document.getElementById('narrationPercent') ? document.getElementById('narrationPercent').value : '',
+            document.getElementById('narrationDocNo') ? document.getElementById('narrationDocNo').value : '',
+            document.getElementById('narrationPurpose') ? document.getElementById('narrationPurpose').value : '',
+            mailChain
+        ) : '';
+    },
+
+    // Reads the form into a narration object to store on the task, or null
+    // if no Narration Type is selected (the feature is entirely optional).
+    collectNarration() {
+        const name = document.getElementById('taskNarrationType') ? document.getElementById('taskNarrationType').value : '';
+        const nr = (this.lists.narrationTypes || []).find(x => x.name === name);
+        if (!nr) return null;
+        const percent = document.getElementById('narrationPercent') ? document.getElementById('narrationPercent').value.trim() : '';
+        const docNo = document.getElementById('narrationDocNo') ? document.getElementById('narrationDocNo').value.trim() : '';
+        const purpose = document.getElementById('narrationPurpose') ? document.getElementById('narrationPurpose').value.trim() : '';
+        const mailChain = document.getElementById('taskMailChain') ? document.getElementById('taskMailChain').value.trim() : '';
+        return {
+            typeId: nr.id, typeName: nr.name, percent, docNo, purpose,
+            text: this.buildNarrationText(nr, percent, docNo, purpose, mailChain)
+        };
+    },
+
+    // Task-modal side: prefills the Narration Type + its fields when editing
+    // an entry that already has one.
+    renderNarrationFields(narration) {
+        this.setSelectValue('taskNarrationType', narration ? narration.typeName : '');
+        this.onNarrationTypeChange();
+        document.getElementById('narrationPercent').value = narration ? (narration.percent || '') : '';
+        document.getElementById('narrationDocNo').value = narration ? (narration.docNo || '') : '';
+        document.getElementById('narrationPurpose').value = narration ? (narration.purpose || '') : '';
+        this.updateNarrationPreview();
+    },
+
     // Returns an error message if a required conditional field is missing
     // for the category+status combo currently selected, or '' if fine.
     validatePaymentDetails(fields) {
@@ -3777,6 +3987,13 @@ const app = {
                 const missing = sc.fields.filter(f => !((fields.subCategoryFields || {})[f.label] || '').toString().trim());
                 if (missing.length) return 'Fill in ' + missing.map(f => f.label).join(', ') + ' before marking this Completed.';
             }
+        }
+        // Tally Narration is opt-in — only enforced once a Narration Type
+        // has actually been picked, so it never blocks a non-payment entry.
+        if (fields.narration) {
+            const nr = (this.lists.narrationTypes || []).find(x => x.id === fields.narration.typeId);
+            if (!fields.narration.docNo) return 'Enter the ' + ((nr && nr.docLabel) || 'document number') + ' for the Tally Narration, or clear the Narration Type.';
+            if (nr && nr.hasPercent && !fields.narration.percent) return 'Enter the % for the Tally Narration.';
         }
         return '';
     },
@@ -3804,6 +4021,7 @@ const app = {
             keyPoints: this.collectKeyPoints(),
             paymentDetails: this.collectPaymentDetails(),
             subCategoryFields: this.collectSubCategoryFields(),
+            narration: this.collectNarration(),
             updatedAt: Date.now()
         };
 
