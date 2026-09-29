@@ -251,11 +251,23 @@ const app = {
 
     // What actually goes into a report line for this task: the Tally
     // Narration if one was generated (it's already the clearest, most
-    // complete description of what was done), otherwise whatever is in
-    // Notes (which also picks up any remark typed in the Past Due Alert),
-    // otherwise the fallback the caller supplies.
+    // complete description of what was done) — but WITHOUT the Mail Chain
+    // / mail subject baked into it, since that's meant for Tally, not the
+    // report — otherwise whatever is in Notes (which also picks up any
+    // remark typed in the Past Due Alert), otherwise the fallback given.
     reportDetailsFor(task, fallback) {
-        if (task && task.narration && task.narration.text) return task.narration.text;
+        if (task && task.narration) {
+            if (task.narration.reportText) return task.narration.reportText;
+            if (task.narration.text) {
+                // Older entries saved before reportText existed: strip the
+                // Mail Chain back out of the already-built text.
+                let t = task.narration.text;
+                if (task.mailChain && t.indexOf(task.mailChain) !== -1) {
+                    t = t.split(task.mailChain).join('').trim();
+                }
+                return t;
+            }
+        }
         if (task && task.notes) return task.notes;
         return fallback || '';
     },
@@ -4160,7 +4172,11 @@ const app = {
         const subCategoryText = this.currentSubCategoryFieldsText();
         return {
             typeId: nr.id, typeName: nr.name, percent, docNo, purpose, fieldsValues,
-            text: this.buildNarrationText(nr, percent, docNo, purpose, mailChain, fieldsValues, subCategoryText)
+            // Full text (with Mail Chain) for Tally / Copy Narration.
+            text: this.buildNarrationText(nr, percent, docNo, purpose, mailChain, fieldsValues, subCategoryText),
+            // Same narration without the Mail Chain — what the Daily
+            // Activity Report actually uses (see reportDetailsFor).
+            reportText: this.buildNarrationText(nr, percent, docNo, purpose, '', fieldsValues, subCategoryText)
         };
     },
 
