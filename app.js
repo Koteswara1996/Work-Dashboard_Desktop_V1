@@ -1827,19 +1827,54 @@ const app = {
         if (!Array.isArray(this.lists.narrationTypes)) this.lists.narrationTypes = [];
         if (!parsedStored || !Array.isArray(parsedStored.narrationTypes)) {
             this.lists.narrationTypes = [
-                { id: this.newId(), name: 'Advance against Purchase Order', hasPercent: true, phrase: 'Advance amount paid against Po No: ', docLabel: 'PO No' },
-                { id: this.newId(), name: '2nd Advance against Purchase Order', hasPercent: true, phrase: '2nd Advance amount paid against Po No: ', docLabel: 'PO No' },
-                { id: this.newId(), name: 'Balance Payment against Purchase Order/Invoice', hasPercent: false, phrase: 'Balance amount paid against Invoice No: ', docLabel: 'Invoice No' },
-                { id: this.newId(), name: 'COD Charges against Invoice', hasPercent: false, phrase: 'Amount Paid twds COD Charges Against Invoice No: ', docLabel: 'Invoice No' },
-                { id: this.newId(), name: 'COD Charges against Order Id', hasPercent: false, phrase: 'Amount Paid twds COD Charges Against Order Id: ', docLabel: 'Order Id' },
-                { id: this.newId(), name: 'I&C Charges', hasPercent: false, phrase: 'Amount paid twds I&C Charges for Order id: ', docLabel: 'Order Id' },
-                { id: this.newId(), name: 'Employee Advance Request', hasPercent: false, phrase: 'Amount Paid Against Emploee Advance Request Form No: ', docLabel: 'Form No' },
-                { id: this.newId(), name: 'Employee Advance Settlement', hasPercent: false, phrase: 'Amount Paid Against Emploee Settlement Request Form No: ', docLabel: 'Form No' },
-                { id: this.newId(), name: 'Payment against Invoice', hasPercent: false, phrase: 'amount paid against Invoice No: ', docLabel: 'Invoice No' },
-                { id: this.newId(), name: 'Legal Charges (against Case No)', hasPercent: false, phrase: 'amount paid for Legal Charges against Case No: ', docLabel: 'Case No(s)' },
-                { id: this.newId(), name: 'Legal Charges (without Case No)', hasPercent: false, phrase: 'amount paid for Legal Charges for ', docLabel: 'Description' }
+                { id: this.newId(), name: 'Advance against Purchase Order', hasPercent: true, phrase: 'Advance amount paid against Po No: ', docLabel: 'PO No', fields: [], leadFieldLabel: '' },
+                { id: this.newId(), name: '2nd Advance against Purchase Order', hasPercent: true, phrase: '2nd Advance amount paid against Po No: ', docLabel: 'PO No', fields: [], leadFieldLabel: '' },
+                { id: this.newId(), name: 'Balance Payment against Purchase Order/Invoice', hasPercent: false, phrase: 'Balance amount paid against Invoice No: ', docLabel: 'Invoice No', fields: [], leadFieldLabel: '' },
+                { id: this.newId(), name: 'COD Charges against Invoice', hasPercent: false, phrase: 'Amount Paid twds COD Charges Against Invoice No: ', docLabel: 'Invoice No', fields: [], leadFieldLabel: '' },
+                { id: this.newId(), name: 'COD Charges against Order Id', hasPercent: false, phrase: 'Amount Paid twds COD Charges Against Order Id: ', docLabel: 'Order Id', fields: [{ label: 'Vendor Name', options: [] }], leadFieldLabel: 'Vendor Name' },
+                { id: this.newId(), name: 'COD Charges against PO', hasPercent: false, phrase: 'Amount Paid twds COD Charges Against PO No: ', docLabel: 'PO No', fields: [{ label: 'Vendor Name', options: [] }], leadFieldLabel: 'Vendor Name' },
+                { id: this.newId(), name: 'I&C Charges', hasPercent: false, phrase: 'Amount paid twds I&C Charges for Order id: ', docLabel: 'Order Id', fields: [], leadFieldLabel: '' },
+                { id: this.newId(), name: 'Employee Advance Request', hasPercent: false, phrase: 'Amount Paid Against Emploee Advance Request Form No: ', docLabel: 'Form No', fields: [], leadFieldLabel: '' },
+                { id: this.newId(), name: 'Employee Advance Settlement', hasPercent: false, phrase: 'Amount Paid Against Emploee Settlement Request Form No: ', docLabel: 'Form No', fields: [], leadFieldLabel: '' },
+                { id: this.newId(), name: 'Payment against Invoice', hasPercent: false, phrase: 'amount paid against Invoice No: ', docLabel: 'Invoice No', fields: [], leadFieldLabel: '' },
+                { id: this.newId(), name: 'Legal Charges (against Case No)', hasPercent: false, phrase: 'amount paid for Legal Charges against Case No: ', docLabel: 'Case No(s)', fields: [], leadFieldLabel: '' },
+                { id: this.newId(), name: 'Legal Charges (without Case No)', hasPercent: false, phrase: 'amount paid for Legal Charges for ', docLabel: 'Description', fields: [], leadFieldLabel: '' }
             ];
+        } else {
+            // Upgrade path: a profile saved before "extra fields" existed
+            // (no narration type has a `fields` array yet) gets Vendor Name
+            // added to the two COD-by-reference types, adding the PO
+            // variant if it's missing entirely. Never runs again once any
+            // type has a `fields` array — after that it's fully in the
+            // user's hands via Manage Narration Types.
+            const hadFieldsAlready = this.lists.narrationTypes.some(nr => Array.isArray(nr.fields));
+            this.lists.narrationTypes.forEach(nr => {
+                if (!Array.isArray(nr.fields)) nr.fields = [];
+                if (typeof nr.leadFieldLabel !== 'string') nr.leadFieldLabel = '';
+            });
+            if (!hadFieldsAlready) this.ensureCodVendorFields();
         }
+    },
+
+    // See loadLists()'s upgrade path above — adds a "Vendor Name" lead
+    // field to "COD Charges against Order Id" and "COD Charges against PO"
+    // (creating the PO variant if it doesn't exist), without touching
+    // anything else in narrationTypes.
+    ensureCodVendorFields() {
+        if (!Array.isArray(this.lists.narrationTypes)) return;
+        [
+            { name: 'COD Charges against Order Id', phrase: 'Amount Paid twds COD Charges Against Order Id: ', docLabel: 'Order Id' },
+            { name: 'COD Charges against PO', phrase: 'Amount Paid twds COD Charges Against PO No: ', docLabel: 'PO No' }
+        ].forEach(spec => {
+            let nr = this.lists.narrationTypes.find(x => x.name === spec.name);
+            if (!nr) {
+                nr = { id: this.newId(), name: spec.name, hasPercent: false, phrase: spec.phrase, docLabel: spec.docLabel, fields: [], leadFieldLabel: '' };
+                this.lists.narrationTypes.push(nr);
+            }
+            if (!Array.isArray(nr.fields)) nr.fields = [];
+            if (!nr.fields.some(f => f.label === 'Vendor Name')) nr.fields.push({ label: 'Vendor Name', options: [] });
+            if (!nr.leadFieldLabel) nr.leadFieldLabel = 'Vendor Name';
+        });
     },
 
     saveLists(bump = true) {
@@ -3845,13 +3880,13 @@ const app = {
             row.className = 'form-group scr-value-row';
             if (f.options && f.options.length) {
                 row.innerHTML = `<label>${this.sanitize(f.label)}</label>
-                    <select class="scr-value-input" data-label="${this.escAttr(f.label)}">
+                    <select class="scr-value-input" data-label="${this.escAttr(f.label)}" onchange="app.updateNarrationPreview()">
                         <option value="">Select</option>
                         ${f.options.map(o => `<option value="${this.escAttr(o)}" ${o === val ? 'selected' : ''}>${this.sanitize(o)}</option>`).join('')}
                     </select>`;
             } else {
                 row.innerHTML = `<label>${this.sanitize(f.label)}</label>
-                    <input type="text" class="scr-value-input" data-label="${this.escAttr(f.label)}" value="${this.escAttr(val)}">`;
+                    <input type="text" class="scr-value-input" data-label="${this.escAttr(f.label)}" value="${this.escAttr(val)}" oninput="app.updateNarrationPreview()">`;
             }
             box.appendChild(row);
         });
@@ -3871,9 +3906,14 @@ const app = {
        Builds the accounting-entry sentence Tally needs for a payment,
        straight from the same New Entry screen: "Being " + an optional % +
        a fixed phrase (per narration type) + the document number entered at
-       completion + an optional note + the Mail Chain already captured when
-       the task was first created. Optional — only used when a Narration
-       Type is picked; skipped entirely otherwise. ---------- */
+       completion + any extra fields the type defines + an optional note +
+       whatever the entry's Sub Category fields hold + the Mail Chain
+       already captured when the task was first created. A type can also
+       name one of its extra fields as the "lead field" (e.g. Vendor
+       Name) — when set, the narration becomes "<lead value> : ..."
+       instead of "Being ...", and the Mail Chain is left out entirely.
+       Optional — only used when a Narration Type is picked; skipped
+       entirely otherwise. ---------- */
     openNarrationRules() {
         this.editingNrId = null;
         this.resetNrForm();
@@ -3891,6 +3931,23 @@ const app = {
         document.getElementById('nrHasPercent').checked = false;
         document.getElementById('nrPhrase').value = '';
         document.getElementById('nrDocLabel').value = '';
+        document.getElementById('nrFieldRows').innerHTML = '';
+    },
+
+    addNrFieldRow(label = '', options = [], isLead = false) {
+        const box = document.getElementById('nrFieldRows');
+        if (!box) return;
+        const row = document.createElement('div');
+        row.className = 'keypoint-row nr-field-row';
+        row.innerHTML = `
+            <input type="text" class="kp-key nr-field-label" placeholder="Field label (e.g. Vendor Name)" value="${this.escAttr(label)}">
+            <input type="text" class="kp-value nr-field-options" placeholder="Options, comma separated (blank = plain text)" value="${this.escAttr((options || []).join(', '))}">
+            <label style="display:flex; align-items:center; gap:4px; font-size:0.68rem; color:var(--label-2); white-space:nowrap; cursor:pointer; flex:0 0 auto;" title="Lead field: shown first as '&lt;value&gt; : ...' instead of 'Being ...', and the Mail Chain is left out">
+                <input type="radio" name="nrLeadField" class="nr-field-lead" style="width:auto;" ${isLead ? 'checked' : ''}> Lead
+            </label>
+            <button type="button" class="btn-icon bad" onclick="this.closest('.nr-field-row').remove()" title="Remove">${this.SVGS.bin}</button>
+        `;
+        box.appendChild(row);
     },
 
     renderNarrationRulesList() {
@@ -3901,15 +3958,18 @@ const app = {
             box.innerHTML = '<div class="empty-state" style="padding:14px;"><span>No narration types yet — add one below.</span></div>';
             return;
         }
-        box.innerHTML = items.map(nr => `
+        box.innerHTML = items.map(nr => {
+            const extra = (nr.fields || []).map(f => f.label + (f.label === nr.leadFieldLabel ? ' (lead)' : '')).join(', ');
+            return `
             <div style="display:flex; align-items:center; gap:10px; padding:10px 12px; border-radius:10px; background:var(--input-bg); border:1px solid var(--line);">
                 <div style="flex:1; min-width:0;">
                     <div style="font-weight:700; font-size:0.88rem; color:var(--label);">${this.sanitize(nr.name)}</div>
-                    <div style="font-size:0.76rem; color:var(--label-2);">Being ${nr.hasPercent ? '[%] ' : ''}${this.sanitize(nr.phrase)}[${this.sanitize(nr.docLabel)}]</div>
+                    <div style="font-size:0.76rem; color:var(--label-2);">Being ${nr.hasPercent ? '[%] ' : ''}${this.sanitize(nr.phrase)}[${this.sanitize(nr.docLabel)}]${extra ? ' · Fields: ' + this.sanitize(extra) : ''}</div>
                 </div>
                 <button type="button" class="btn-icon" onclick="app.editNarrationRule('${this.escAttr(nr.id)}')" title="Edit">${this.SVGS.edit}</button>
                 <button type="button" class="btn-icon bad" onclick="app.deleteNarrationRule('${this.escAttr(nr.id)}')" title="Delete">${this.SVGS.bin}</button>
-            </div>`).join('');
+            </div>`;
+        }).join('');
     },
 
     editNarrationRule(id) {
@@ -3920,6 +3980,18 @@ const app = {
         document.getElementById('nrHasPercent').checked = !!nr.hasPercent;
         document.getElementById('nrPhrase').value = nr.phrase;
         document.getElementById('nrDocLabel').value = nr.docLabel;
+        document.getElementById('nrFieldRows').innerHTML = '';
+        (nr.fields || []).forEach(f => this.addNrFieldRow(f.label, f.options || [], f.label === nr.leadFieldLabel));
+    },
+
+    collectNrFields() {
+        return Array.from(document.querySelectorAll('#nrFieldRows .nr-field-row')).map(row => {
+            const label = row.querySelector('.nr-field-label').value.trim();
+            const optsRaw = row.querySelector('.nr-field-options').value.trim();
+            const options = optsRaw ? optsRaw.split(',').map(s => s.trim()).filter(Boolean) : [];
+            const isLead = row.querySelector('.nr-field-lead').checked;
+            return { label, options, isLead };
+        }).filter(f => f.label);
     },
 
     saveNarrationRule() {
@@ -3928,17 +4000,21 @@ const app = {
         const hasPercent = document.getElementById('nrHasPercent').checked;
         const phrase = document.getElementById('nrPhrase').value;
         const docLabel = document.getElementById('nrDocLabel').value.trim() || 'Document No';
+        const collected = this.collectNrFields();
+        const fields = collected.map(f => ({ label: f.label, options: f.options }));
+        const lead = collected.find(f => f.isLead);
+        const leadFieldLabel = lead ? lead.label : '';
         if (!Array.isArray(this.lists.narrationTypes)) this.lists.narrationTypes = [];
 
         if (this.editingNrId) {
             const nr = this.lists.narrationTypes.find(x => String(x.id) === String(this.editingNrId));
-            if (nr) { nr.name = name; nr.hasPercent = hasPercent; nr.phrase = phrase; nr.docLabel = docLabel; }
+            if (nr) { nr.name = name; nr.hasPercent = hasPercent; nr.phrase = phrase; nr.docLabel = docLabel; nr.fields = fields; nr.leadFieldLabel = leadFieldLabel; }
         } else {
             if (this.lists.narrationTypes.some(x => x.name.toLowerCase() === name.toLowerCase())) {
                 this.showToast('A narration type with that name already exists.', 'warning');
                 return;
             }
-            this.lists.narrationTypes.push({ id: this.newId(), name, hasPercent, phrase, docLabel });
+            this.lists.narrationTypes.push({ id: this.newId(), name, hasPercent, phrase, docLabel, fields, leadFieldLabel });
         }
 
         this.saveLists();
@@ -3955,8 +4031,9 @@ const app = {
         this.showToast('Narration type removed.', 'success');
     },
 
-    // Task-modal side: shows/hides the % field and updates the document
-    // label for whichever Narration Type is currently selected.
+    // Task-modal side: shows/hides the % field, updates the document
+    // label, and rebuilds the extra-fields inputs for whichever Narration
+    // Type is currently selected.
     onNarrationTypeChange() {
         const name = document.getElementById('taskNarrationType').value;
         const wrap = document.getElementById('narrationFieldsWrap');
@@ -3968,17 +4045,86 @@ const app = {
         if (docLabelEl) docLabelEl.textContent = nr ? nr.docLabel : 'Document No';
         const docInput = document.getElementById('narrationDocNo');
         if (docInput) docInput.placeholder = nr ? ('e.g. ' + nr.docLabel) : '';
+        this.renderNarrationExtraFields(nr);
         this.updateNarrationPreview();
     },
 
-    // Pure builder: "Being " + [%] + fixed phrase + doc no + [note] + mail chain.
-    buildNarrationText(nr, percent, docNo, purpose, mailChain) {
+    // Shows whatever extra fields the CURRENTLY selected Narration Type
+    // defines (e.g. Vendor Name), prefilled if editing an existing task.
+    renderNarrationExtraFields(nr, prefillValues) {
+        const box = document.getElementById('narrationExtraFieldsWrap');
+        if (!box) return;
+        box.innerHTML = '';
+        if (!nr || !nr.fields || !nr.fields.length) return;
+        const values = prefillValues || {};
+        nr.fields.forEach(f => {
+            const val = values[f.label] || '';
+            const row = document.createElement('div');
+            row.className = 'form-group nr-value-row';
+            if (f.options && f.options.length) {
+                row.innerHTML = `<label>${this.sanitize(f.label)}</label>
+                    <select class="nr-value-input" data-label="${this.escAttr(f.label)}" onchange="app.updateNarrationPreview()">
+                        <option value="">Select</option>
+                        ${f.options.map(o => `<option value="${this.escAttr(o)}" ${o === val ? 'selected' : ''}>${this.sanitize(o)}</option>`).join('')}
+                    </select>`;
+            } else {
+                row.innerHTML = `<label>${this.sanitize(f.label)}</label>
+                    <input type="text" class="nr-value-input" data-label="${this.escAttr(f.label)}" value="${this.escAttr(val)}" oninput="app.updateNarrationPreview()">`;
+            }
+            box.appendChild(row);
+        });
+    },
+
+    collectNarrationExtraFields() {
+        const box = document.getElementById('narrationExtraFieldsWrap');
+        if (!box) return {};
+        const out = {};
+        box.querySelectorAll('.nr-value-input').forEach(el => { if (el.value) out[el.dataset.label] = el.value; });
+        return out;
+    },
+
+    // What the currently-selected Sub Category's fields add to the
+    // narration — "Label: value, Label: value" — read live from the form.
+    currentSubCategoryFieldsText() {
+        const el = document.getElementById('taskSubCategory');
+        const name = el ? el.value : '';
+        const sc = (this.lists.subCategories || []).find(x => x.name === name);
+        if (!sc || !sc.fields || !sc.fields.length) return '';
+        const vals = this.collectSubCategoryFields();
+        return sc.fields.map(f => {
+            const v = (vals[f.label] || '').toString().trim();
+            return v ? (f.label + ': ' + v) : '';
+        }).filter(Boolean).join(', ');
+    },
+
+    // Pure builder. Standard form: "Being " + [%] + fixed phrase + doc no +
+    // [extra fields] + [note] + [sub category fields] + Mail Chain. If the
+    // type names a lead field and it has a value, that becomes
+    // "<value> : " up front instead of "Being ...", and Mail Chain is left
+    // off entirely.
+    buildNarrationText(nr, percent, docNo, purpose, mailChain, fieldsValues, subCategoryText) {
         if (!nr) return '';
+        fieldsValues = fieldsValues || {};
+
+        const extraBits = (nr.fields || [])
+            .filter(f => f.label !== nr.leadFieldLabel)
+            .map(f => (fieldsValues[f.label] || '').toString().trim())
+            .filter(Boolean);
+
+        let middle = (nr.phrase || '') + String(docNo || '').trim();
+        [extraBits.join(' '), String(purpose || '').trim(), String(subCategoryText || '').trim()]
+            .filter(Boolean)
+            .forEach(bit => { middle += ' ' + bit; });
+
+        const leadValue = nr.leadFieldLabel ? (fieldsValues[nr.leadFieldLabel] || '').toString().trim() : '';
+        if (nr.leadFieldLabel && leadValue) {
+            const pct = (nr.hasPercent && String(percent || '').trim()) ? String(percent).trim() + '% ' : '';
+            return leadValue + ' : ' + pct + middle;
+        }
+
         let text = 'Being ';
         if (nr.hasPercent && String(percent || '').trim()) text += String(percent).trim() + '% ';
-        text += nr.phrase || '';
-        text += String(docNo || '').trim();
-        if (String(purpose || '').trim()) text += ' ' + String(purpose).trim();
+        text += middle;
         if (String(mailChain || '').trim()) text += ' ' + String(mailChain).trim();
         return text;
     },
@@ -3994,7 +4140,9 @@ const app = {
             document.getElementById('narrationPercent') ? document.getElementById('narrationPercent').value : '',
             document.getElementById('narrationDocNo') ? document.getElementById('narrationDocNo').value : '',
             document.getElementById('narrationPurpose') ? document.getElementById('narrationPurpose').value : '',
-            mailChain
+            mailChain,
+            this.collectNarrationExtraFields(),
+            this.currentSubCategoryFieldsText()
         ) : '';
     },
 
@@ -4008,9 +4156,11 @@ const app = {
         const docNo = document.getElementById('narrationDocNo') ? document.getElementById('narrationDocNo').value.trim() : '';
         const purpose = document.getElementById('narrationPurpose') ? document.getElementById('narrationPurpose').value.trim() : '';
         const mailChain = document.getElementById('taskMailChain') ? document.getElementById('taskMailChain').value.trim() : '';
+        const fieldsValues = this.collectNarrationExtraFields();
+        const subCategoryText = this.currentSubCategoryFieldsText();
         return {
-            typeId: nr.id, typeName: nr.name, percent, docNo, purpose,
-            text: this.buildNarrationText(nr, percent, docNo, purpose, mailChain)
+            typeId: nr.id, typeName: nr.name, percent, docNo, purpose, fieldsValues,
+            text: this.buildNarrationText(nr, percent, docNo, purpose, mailChain, fieldsValues, subCategoryText)
         };
     },
 
@@ -4022,6 +4172,8 @@ const app = {
         document.getElementById('narrationPercent').value = narration ? (narration.percent || '') : '';
         document.getElementById('narrationDocNo').value = narration ? (narration.docNo || '') : '';
         document.getElementById('narrationPurpose').value = narration ? (narration.purpose || '') : '';
+        const nr = (this.lists.narrationTypes || []).find(x => x.name === (narration && narration.typeName));
+        this.renderNarrationExtraFields(nr, narration ? narration.fieldsValues : {});
         this.updateNarrationPreview();
     },
 
@@ -4048,6 +4200,10 @@ const app = {
             const nr = (this.lists.narrationTypes || []).find(x => x.id === fields.narration.typeId);
             if (!fields.narration.docNo) return 'Enter the ' + ((nr && nr.docLabel) || 'document number') + ' for the Tally Narration, or clear the Narration Type.';
             if (nr && nr.hasPercent && !fields.narration.percent) return 'Enter the % for the Tally Narration.';
+            if (nr && nr.fields && nr.fields.length) {
+                const missing = nr.fields.filter(f => !((fields.narration.fieldsValues || {})[f.label] || '').toString().trim());
+                if (missing.length) return 'Fill in ' + missing.map(f => f.label).join(', ') + ' for the Tally Narration.';
+            }
         }
         return '';
     },
