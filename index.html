@@ -1872,6 +1872,7 @@
                             <label id="narrationDocLabel">Document No</label>
                             <input autocomplete="off" type="text" id="narrationDocNo" placeholder="e.g. INPO/PP/26-27/0156" oninput="app.updateNarrationPreview()">
                         </div>
+                        <div id="narrationExtraFieldsWrap"></div>
                         <div class="form-group">
                             <label>Purpose / Note <span style="font-weight:400; text-transform:none; letter-spacing:0;">(optional)</span></label>
                             <input autocomplete="off" type="text" id="narrationPurpose" placeholder="e.g. After TDS of 10%" oninput="app.updateNarrationPreview()">
@@ -1952,7 +1953,7 @@
                 <h2>Tally Narration Types</h2>
                 <button class="modal-close" onclick="app.closeNarrationRules()">✕</button>
             </div>
-            <p class="cfg-hint" style="padding:0 2px;">Each type builds one sentence: "Being " + an optional % + a fixed phrase + the document number you enter at completion + an optional note + this entry's Mail Chain. Set the templates up here, once.</p>
+            <p class="cfg-hint" style="padding:0 2px;">Each type builds one sentence: "Being " + an optional % + a fixed phrase + the document number you enter at completion + any extra fields below + an optional note + this entry's Mail Chain. Mark one extra field "Lead" to put it first instead — "&lt;value&gt; : ..." — and drop the Mail Chain (e.g. Vendor Name on a COD charge).</p>
             <div id="narrationRulesList" style="display:flex; flex-direction:column; gap:8px; max-height:220px; overflow-y:auto; margin: 10px 0;"></div>
             <div class="form-group">
                 <label>Narration Type Name</label>
@@ -1968,6 +1969,11 @@
             <div class="form-group">
                 <label>Document Field Label</label>
                 <input autocomplete="off" type="text" id="nrDocLabel" placeholder="e.g. PO No">
+            </div>
+            <div class="form-group">
+                <label>Extra Fields <span style="font-weight:400; text-transform:none; letter-spacing:0;">(optional — whatever else this type needs to ask for)</span></label>
+                <div id="nrFieldRows" style="display:flex; flex-direction:column; gap:8px; margin-bottom:10px;"></div>
+                <button type="button" class="fp-action-btn" onclick="app.addNrFieldRow()">+ Add Field</button>
             </div>
             <div class="modal-buttons" style="margin-top:14px;">
                 <button type="button" class="btn-modal primary" onclick="app.saveNarrationRule()">Save Narration Type</button>
